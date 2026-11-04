@@ -1,0 +1,50 @@
+# Tests and packages on the three systems. No Dolphin and no version inside for now:
+# the fork's release isn't out, and a .wpver contains game files, which stay out of git.
+name: Launcher
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev patchelf
+      - run: npm ci
+      - name: Empty tools folder
+        shell: bash
+        run: mkdir -p src-tauri/tools && echo "Vide en CI" > src-tauri/tools/README.md
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --locked
+      - name: Packages
+        shell: bash
+        run: npx tauri build --config '{"build":{"beforeBuildCommand":"npm run build"}}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-${{ matrix.os }}
+          path: |
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*-setup.exe
+            src-tauri/target/release/bundle/**/*.dmg
+          if-no-files-found: error
