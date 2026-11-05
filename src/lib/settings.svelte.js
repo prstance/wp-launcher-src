@@ -4,6 +4,7 @@ import { inTauri } from "./tauri.js";
 
 export const settings = $state({
   loaded: false,
+  player: null, // { name, mii }: the account, made on the welcome screen
   iso: null, // { path, name, gameId, country }
   recent: [],
   alwaysUseIso: false,

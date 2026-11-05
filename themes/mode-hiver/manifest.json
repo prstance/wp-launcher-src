@@ -1,0 +1,369 @@
+{
+  "name": {
+    "fr": "Mode Hiver",
+    "en": "Winter Mode",
+    "es": "Modo invierno"
+  },
+  "description": {
+    "fr": "L’Île aux défis sous la neige : tempête, cases avalanche, mur de glace qui se fissure, boule de neige géante, grotte de glace et son yéti, ponts de glace, et le sceau du Sanctuaire du glacier à briser au piolet. Les joueurs gelés ne lancent plus qu’un dé de glace de 1 à 3. Avec 9 nouveaux mini-jeux d’hiver.",
+    "en": "Board Game Island under the snow: a snowstorm, avalanche spaces, an ice wall that cracks, a giant snowball, an ice cave and its yeti, ice bridges, and the seal of the Sanctuary of the Glacier to break with an ice axe. Frozen players only roll a 1-3 ice die. With 9 new winter minigames.",
+    "es": "La Isla Aventura bajo la nieve: tormenta, casillas de alud, un muro de hielo que se agrieta, una bola de nieve gigante, una cueva de hielo con su yeti, puentes de hielo y el sello del Santuario del glaciar, que se rompe a golpes de piolet. Los jugadores congelados solo tiran un dado de hielo del 1 al 3. Con 9 minijuegos de invierno nuevos."
+  },
+  "settings": [
+    {
+      "id": "difficulte",
+      "type": "choice",
+      "label": {
+        "fr": "Difficulté",
+        "en": "Difficulty",
+        "es": "Dificultad"
+      },
+      "description": {
+        "fr": "Règle d’un coup le yéti, le sceau, le mur et la corde",
+        "en": "Sets the yeti, the seal, the wall and the rope at once",
+        "es": "Ajusta a la vez el yeti, el sello, el muro y la cuerda"
+      },
+      "default": 1,
+      "choices": [
+        {
+          "value": 0,
+          "label": {
+            "fr": "Douce",
+            "en": "Gentle",
+            "es": "Suave"
+          },
+          "sets": {
+            "yeti": 25,
+            "sceau": 6,
+            "mur": 3,
+            "corde": 15
+          }
+        },
+        {
+          "value": 1,
+          "label": {
+            "fr": "Normale",
+            "en": "Normal",
+            "es": "Normal"
+          },
+          "sets": {
+            "yeti": 50,
+            "sceau": 12,
+            "mur": 4,
+            "corde": 25
+          }
+        },
+        {
+          "value": 2,
+          "label": {
+            "fr": "Glaciale",
+            "en": "Freezing",
+            "es": "Glacial"
+          },
+          "sets": {
+            "yeti": 75,
+            "sceau": 18,
+            "mur": 6,
+            "corde": 35
+          }
+        },
+        {
+          "value": 3,
+          "label": {
+            "fr": "Personnalisée",
+            "en": "Custom",
+            "es": "Personalizada"
+          }
+        }
+      ]
+    },
+    {
+      "id": "yeti",
+      "type": "choice",
+      "label": {
+        "fr": "Réveil du yéti",
+        "en": "Yeti waking up",
+        "es": "Despertar del yeti"
+      },
+      "description": {
+        "fr": "Ses chances de se réveiller quand on passe devant lui",
+        "en": "The chance it wakes up when you walk past it",
+        "es": "La probabilidad de que se despierte al pasar a su lado"
+      },
+      "default": 50,
+      "choices": [
+        {
+          "value": 0,
+          "label": {
+            "fr": "Jamais",
+            "en": "Never",
+            "es": "Nunca"
+          }
+        },
+        {
+          "value": 25,
+          "label": {
+            "fr": "1 fois sur 4",
+            "en": "1 in 4",
+            "es": "1 de cada 4"
+          }
+        },
+        {
+          "value": 50,
+          "label": {
+            "fr": "1 fois sur 2",
+            "en": "1 in 2",
+            "es": "1 de cada 2"
+          }
+        },
+        {
+          "value": 75,
+          "label": {
+            "fr": "3 fois sur 4",
+            "en": "3 in 4",
+            "es": "3 de cada 4"
+          }
+        }
+      ],
+      "memory": {
+        "offset": "0x802F55D8",
+        "size": 1
+      }
+    },
+    {
+      "id": "sceau",
+      "type": "choice",
+      "label": {
+        "fr": "Sceau du glacier",
+        "en": "Glacier seal",
+        "es": "Sello del glaciar"
+      },
+      "description": {
+        "fr": "Les coups de piolet qu’il faut pour le briser",
+        "en": "The ice axe blows it takes to break it",
+        "es": "Los golpes de piolet que hacen falta para romperlo"
+      },
+      "default": 12,
+      "choices": [
+        {
+          "value": 6,
+          "label": {
+            "fr": "6 coups",
+            "en": "6 blows",
+            "es": "6 golpes"
+          }
+        },
+        {
+          "value": 12,
+          "label": {
+            "fr": "12 coups",
+            "en": "12 blows",
+            "es": "12 golpes"
+          }
+        },
+        {
+          "value": 18,
+          "label": {
+            "fr": "18 coups",
+            "en": "18 blows",
+            "es": "18 golpes"
+          }
+        }
+      ],
+      "memory": {
+        "offset": "0x802F55D9",
+        "size": 1
+      }
+    },
+    {
+      "id": "mur",
+      "type": "number",
+      "label": {
+        "fr": "Mur de glace",
+        "en": "Ice wall",
+        "es": "Muro de hielo"
+      },
+      "description": {
+        "fr": "Le résultat à faire au début de la partie ; il baisse à chaque échec",
+        "en": "The roll needed at the start of the game; it drops after each failure",
+        "es": "La tirada necesaria al empezar la partida; baja con cada fallo"
+      },
+      "min": 3,
+      "max": 6,
+      "step": 1,
+      "default": 4,
+      "memory": {
+        "offset": "0x802F55DA",
+        "size": 1
+      }
+    },
+    {
+      "id": "corde",
+      "type": "choice",
+      "label": {
+        "fr": "Corde de la grotte",
+        "en": "Cave rope",
+        "es": "Cuerda de la cueva"
+      },
+      "description": {
+        "fr": "Les appuis pour remonter en 5 secondes",
+        "en": "The presses needed to climb out in 5 seconds",
+        "es": "Las pulsaciones para subir en 5 segundos"
+      },
+      "default": 25,
+      "choices": [
+        {
+          "value": 15,
+          "label": {
+            "fr": "Facile (15 appuis)",
+            "en": "Easy (15 presses)",
+            "es": "Fácil (15 pulsaciones)"
+          }
+        },
+        {
+          "value": 25,
+          "label": {
+            "fr": "Normale (25 appuis)",
+            "en": "Normal (25 presses)",
+            "es": "Normal (25 pulsaciones)"
+          }
+        },
+        {
+          "value": 35,
+          "label": {
+            "fr": "Difficile (35 appuis)",
+            "en": "Hard (35 presses)",
+            "es": "Difícil (35 pulsaciones)"
+          }
+        }
+      ],
+      "memory": {
+        "offset": "0x802F55DB",
+        "size": 1
+      }
+    },
+    {
+      "id": "mini-jeux",
+      "type": "choice",
+      "label": {
+        "fr": "Mini-jeux d’hiver",
+        "en": "Winter minigames",
+        "es": "Minijuegos de invierno"
+      },
+      "description": {
+        "fr": "Leur fréquence sur le plateau. En 2 contre 2 et en 1 contre 3, il n’y en a pas",
+        "en": "How often they come up on the board. There are none for 2 vs 2 and 1 vs 3",
+        "es": "Con qué frecuencia salen en el tablero. No hay para 2 contra 2 ni 1 contra 3"
+      },
+      "default": 1,
+      "choices": [
+        {
+          "value": 0,
+          "label": {
+            "fr": "Autant que les autres",
+            "en": "As often as the others",
+            "es": "Tanto como los demás"
+          }
+        },
+        {
+          "value": 1,
+          "label": {
+            "fr": "Souvent",
+            "en": "Often",
+            "es": "A menudo"
+          }
+        },
+        {
+          "value": 2,
+          "label": {
+            "fr": "Très souvent",
+            "en": "Very often",
+            "es": "Muy a menudo"
+          }
+        },
+        {
+          "value": 3,
+          "label": {
+            "fr": "Uniquement eux",
+            "en": "Only them",
+            "es": "Solo ellos"
+          }
+        }
+      ],
+      "memory": {
+        "offset": "0x802F55DC",
+        "size": 1
+      }
+    },
+    {
+      "id": "tempete",
+      "type": "toggle",
+      "label": {
+        "fr": "Tempête de neige",
+        "en": "Snowstorm",
+        "es": "Tormenta de nieve"
+      },
+      "description": {
+        "fr": "La neige qui tombe sur tout le plateau",
+        "en": "Snow falling over the whole board",
+        "es": "La nieve que cae sobre todo el tablero"
+      },
+      "default": 1,
+      "memory": {
+        "offset": "0x802F55DD",
+        "size": 1
+      }
+    },
+    {
+      "id": "tenues",
+      "type": "choice",
+      "label": {
+        "fr": "Tenues",
+        "en": "Outfits",
+        "es": "Trajes"
+      },
+      "description": {
+        "fr": "Ce que portent les Mii sur le plateau",
+        "en": "What the Miis wear on the board",
+        "es": "Lo que llevan los Mii en el tablero"
+      },
+      "default": 1,
+      "choices": [
+        {
+          "value": 1,
+          "label": {
+            "fr": "Elfes",
+            "en": "Elves",
+            "es": "Elfos"
+          }
+        },
+        {
+          "value": 0,
+          "label": {
+            "fr": "Explorateurs (d’origine)",
+            "en": "Explorers (original)",
+            "es": "Exploradores (originales)"
+          }
+        }
+      ],
+      "memory": {
+        "offset": "0x802F55DE",
+        "size": 1
+      }
+    },
+    {
+      "id": "bonnets",
+      "type": "toggle",
+      "label": {
+        "fr": "Bonnets de Noël",
+        "en": "Christmas hats",
+        "es": "Gorros de Navidad"
+      },
+      "default": 1,
+      "memory": {
+        "offset": "0x802F55DF",
+        "size": 1
+      }
+    }
+  ]
+}

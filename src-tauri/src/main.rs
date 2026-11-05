@@ -1,12 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod delta;
 mod game;
 mod i18n;
+mod lz;
+mod mii;
+mod modes;
 mod mods;
+mod rebuild;
 mod settings;
 mod tools;
+mod update;
 mod versions;
 mod wiimote;
+mod window;
 
 use tauri::Manager;
 
@@ -15,12 +22,19 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(settings::Store::default())
         .manage(game::Game::default())
         .manage(versions::Shipped::default())
+        .manage(window::Enlarged::default())
+        .manage(mii::Library::default())
         .setup(|app| {
             i18n::init(&app.state::<settings::Store>().get(app.handle()).language);
             app.manage(wiimote::start(app.handle().clone()));
+            mii::prepare(app.handle());
+            if let Some(win) = app.get_webview_window("main") {
+                window::init(&win);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -43,6 +57,15 @@ fn main() {
             mods::mods_remove,
             mods::package_detail,
             mods::package_settings_set,
+            mii::miis_state,
+            mii::miis_disc,
+            mii::miis_adopt,
+            mii::miis_import,
+            mii::miis_pick,
+            mii::miis_rename,
+            mii::miis_remove,
+            mii::miis_export,
+            mii::miis_channel,
             versions::versions_state,
             versions::versions_activate,
             versions::versions_import,
@@ -54,6 +77,10 @@ fn main() {
             wiimote::wiimote_identify,
             wiimote::wiimote_move,
             wiimote::wiimote_release,
+            modes::modes_get,
+            window::window_toggle_size,
+            update::launcher_update_check,
+            update::launcher_update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

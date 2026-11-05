@@ -22,6 +22,9 @@
   let version = $state(null);
   let tools = $state([]);
   let folders = $state(null);
+  /** The launcher's update: "idle", "checking", "none" (up to date), "found" (newer: `newer`), "installing". */
+  let updating = $state('idle');
+  let newer = $state(null);
 
   $effect(() => {
     toolsStatus().then((t) => (tools = t));
@@ -41,6 +44,35 @@
   const set = (key, value) => attempt(() => setSettings({ [key]: value }));
   const changeIso = () => attempt(() => (inTauri ? pickIso() : Promise.reject(t('Disponible dans l’application de bureau.'))));
   const openFolder = (which) => attempt(() => invoke('folder_open', { which }));
+  const checkUpdate = () =>
+    attempt(async () => {
+      updating = 'checking';
+      try {
+        newer = inTauri ? await invoke('launcher_update_check') : null;
+      } finally {
+        updating = newer ? 'found' : 'none';
+      }
+    });
+  // (it restarts once installed)
+  const installUpdate = () =>
+    attempt(async () => {
+      updating = 'installing';
+      try {
+        await invoke('launcher_update_install');
+      } catch (e) {
+        updating = 'found';
+        throw e;
+      }
+    });
+  const launcherInfo = $derived(
+    !version
+      ? t('Version inconnue')
+      : updating === 'found'
+        ? t('Version {version} · la {newer} est disponible', { version, newer: newer.version })
+        : updating === 'none'
+          ? t('Version {version} · à jour', { version })
+          : t('Version {version}', { version }),
+  );
 </script>
 
 {#snippet row(label, desc, control, last)}
@@ -137,7 +169,16 @@
           {:else}
             {#snippet nothing()}{/snippet}
             {#snippet data()}{@render action(t('Ouvrir'), () => openFolder('data'))}{/snippet}
-            {@render row('PartyLauncher', version ? t('Version {version}', { version }) : t('Version inconnue'), nothing)}
+            {#snippet update()}
+              {#if updating === 'found'}
+                {@render action(t('Mettre à jour'), installUpdate)}
+              {:else if updating === 'checking' || updating === 'installing'}
+                <span role="status" style="flex-shrink: 0; font-size: 13px; font-weight: 800; color: var(--muted);">{updating === 'checking' ? t('Recherche…') : t('Installation…')}</span>
+              {:else}
+                {@render action(t('Rechercher une mise à jour'), checkUpdate)}
+              {/if}
+            {/snippet}
+            {@render row('PartyLauncher', launcherInfo, update)}
             {#each tools as tool}
               {@render row(tool.name, tool.installedVersion ? t('Version {version}, intégrée au launcher', { version: tool.installedVersion }) : t('Absent de ce build'), nothing)}
             {/each}

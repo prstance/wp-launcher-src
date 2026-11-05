@@ -17,9 +17,19 @@ pub struct Disc {
     pub country: String,
 }
 
+/// The player's account in the launcher.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Player {
+    pub name: String,
+    /// ID of their Mii in the library (mii.rs).
+    pub mii: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
+    /// None until the welcome screen is done.
+    pub player: Option<Player>,
     pub iso: Option<Disc>,
     pub recent: Vec<Disc>,
     /// Jouer starts right away with `iso`, without showing the ISO screen.
@@ -52,6 +62,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            player: None,
             iso: None,
             recent: Vec::new(),
             always_use_iso: false,

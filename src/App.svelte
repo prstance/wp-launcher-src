@@ -7,6 +7,7 @@
   import { versions } from './lib/versions.svelte.js';
   import { game } from './lib/game.svelte.js';
   import { followLanguage, t } from './lib/i18n.svelte.js';
+  import { settings } from './lib/settings.svelte.js';
 
   // Accueil draws its own window buttons in its header.
   const OWN_CONTROLS = ['Main'];
@@ -18,6 +19,11 @@
   const zoom = $derived(Math.min(w / 1280, h / 720));
 
   const Screen = $derived(routes[router.name]);
+
+  // No account yet: the welcome screen makes one first.
+  $effect(() => {
+    if (settings.loaded && !settings.player && router.name !== 'Welcome') location.replace('#/Welcome');
+  });
 
   onMount(startRemoteNav);
   onMount(followLanguage);

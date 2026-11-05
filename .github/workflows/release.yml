@@ -1,0 +1,57 @@
+# A launcher release, from the private code repository, published in the public
+# prstance/wp-launcher (which holds only a README and the releases): installers
+# for the three systems, signed for the updater, and the latest.json that
+# src-tauri/src/update.rs reads. Pushing a tag "v0.2.0" (the version of
+# tauri.conf.json) starts it.
+#
+# Secrets of this repository:
+#   RELEASES_TOKEN               a token that may write the releases of prstance/wp-launcher
+#   TAURI_SIGNING_PRIVATE_KEY    ~/.tauri/partylauncher.key (its contents)
+# The shipped versions (src-tauri/versions/*.wpver, made with --disc: no game
+# file inside) must be in the repository.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev patchelf
+      - run: npm ci
+      - name: Shipped versions
+        shell: bash
+        run: ls src-tauri/versions/*.wpver
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          owner: prstance
+          repo: wp-launcher
+          tagName: v__VERSION__
+          releaseName: PartyLauncher __VERSION__
+          releaseBody: Télécharge l’installateur de ton système ci-dessous. Il te faut ton propre disque de Wii Party (PAL, SUPP01).
+          releaseDraft: false
+          includeUpdaterJson: true

@@ -1,5 +1,8 @@
 <script>
   import { t } from '../lib/i18n.svelte.js';
+  import { settings } from '../lib/settings.svelte.js';
+  import { myMii } from '../lib/miis.svelte.js';
+  import MiiHead from './MiiHead.svelte';
 
   let props = $props();
 
@@ -9,7 +12,7 @@
     const onSh = 'inset 0 3px 0 rgba(255,255,255,0.45), 0 4px 0 var(--accent-deep)';
     const idle = 'var(--muted)';
     const pick = (k) => a === k ? { bg: onBg, fg: '#ffffff', sh: onSh } : { bg: 'transparent', fg: idle, sh: 'none' };
-    const h = pick('home'), l = pick('library'), v = pick('versions'), p = pick('pads'), s = pick('settings');
+    const h = pick('home'), m = pick('miis'), l = pick('library'), v = pick('versions'), p = pick('pads'), s = pick('settings');
     return {
       railBg: 'var(--rail)',
       railLine: 'var(--rail-line)',
@@ -18,6 +21,7 @@
       homeHref: '#/Main',
       libHref: '#/Library',
       homeBg: h.bg, homeFg: h.fg, homeSh: h.sh,
+      miiBg: m.bg, miiFg: m.fg, miiSh: m.sh,
       libBg: l.bg, libFg: l.fg, libSh: l.sh,
       verBg: v.bg, verFg: v.fg, verSh: v.sh,
       padBg: p.bg, padFg: p.fg, padSh: p.sh,
@@ -27,13 +31,19 @@
 </script>
 
 <nav aria-label={t('Navigation principale')} style="width: 104px; height: 100%; box-sizing: border-box; padding: 20px 20px 24px; display: flex; flex-direction: column; align-items: center; gap: 22px; background: {v.railBg}; font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; box-shadow: inset -2px 0 0 {v.railLine};">
-  <a href={v.homeHref} aria-label={t('PartyLauncher, accueil')} style="width: 64px; height: 64px; border-radius: 20px; background: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 {v.tileBase}, 0 10px 20px rgba(60,30,50,0.10); text-decoration: none;">
-    <span aria-hidden="true" style="width: 40px; height: 40px; border-radius: 13px; background: {v.dot}; color: #ffffff; font-size: 24px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 3px 0 rgba(255,255,255,0.4);">P</span>
+  <a href="#/Miis" aria-label={t('Mon compte : {name}', { name: settings.player?.name ?? '' })} title={settings.player?.name} style="margin-bottom: -10px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none;">
+    <span style="width: 64px; height: 64px; border-radius: 22px; background: #ffffff; display: flex; align-items: center; justify-content: center; overflow: hidden; box-shadow: inset 0 -5px 0 {myMii()?.color ?? v.dot}33, 0 5px 0 {v.tileBase}, 0 10px 20px rgba(60,30,50,0.10);">
+      <MiiHead mii={myMii()} size={58} />
+    </span>
+    <span style="max-width: 92px; font-size: 13px; font-weight: 800; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{settings.player?.name ?? ''}</span>
   </a>
 
   <div style="background: #ffffff; border-radius: 28px; padding: 10px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 6px 0 {v.tileBase}, 0 12px 24px rgba(60,30,50,0.10);">
     <a href={v.homeHref} aria-label={t('Accueil')} aria-current={(props.active ?? 'home') === 'home' ? 'page' : undefined} title={t('Accueil')} style="width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; background: {v.homeBg}; color: {v.homeFg}; box-shadow: {v.homeSh};">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"></path></svg>
+    </a>
+    <a href="#/Miis" aria-label={t('Mes Mii')} aria-current={props.active === 'miis' ? 'page' : undefined} title={t('Mes Mii')} style="width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; background: {v.miiBg}; color: {v.miiFg}; box-shadow: {v.miiSh};">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="9" r="5"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg>
     </a>
     <a href={v.libHref} aria-label={t('Bibliothèque de mods')} aria-current={props.active === 'library' ? 'page' : undefined} title={t('Bibliothèque de mods')} style="width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; background: {v.libBg}; color: {v.libFg}; box-shadow: {v.libSh};">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"></rect><rect x="13.5" y="3.5" width="7" height="7" rx="2"></rect><rect x="3.5" y="13.5" width="7" height="7" rx="2"></rect><path d="M17 13.5v7M13.5 17h7"></path></svg>

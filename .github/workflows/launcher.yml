@@ -1,9 +1,9 @@
-# Tests and packages on the three systems. No Dolphin and no version inside for now:
-# the fork's release isn't out, and a .wpver contains game files, which stay out of git.
+# Tests and packages on the three systems, without Dolphin and unsigned: the
+# real packages come from release.yml. By hand only (Actions tab): in a private
+# repository, macOS minutes count ten times.
 name: Launcher
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
@@ -37,7 +37,8 @@ jobs:
         run: cargo test --locked
       - name: Packages
         shell: bash
-        run: npx tauri build --config '{"build":{"beforeBuildCommand":"npm run build"}}'
+        # (no Dolphin, and nothing signed: release.yml makes the real packages)
+        run: npx tauri build --config '{"build":{"beforeBuildCommand":"npm run build"},"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@v4
         with:
           name: launcher-${{ matrix.os }}

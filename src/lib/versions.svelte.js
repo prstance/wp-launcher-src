@@ -10,7 +10,7 @@ const COLORS_KEY = "wp-theme-colors";
 export const versions = $state({ ready: !inTauri, list: [], error: null });
 
 /** What screens draw from the theme. Its colors go straight to the CSS variables. */
-export const theme = $state({ tagline: null, hero: [], home: [], library: [] });
+export const theme = $state({ tagline: null, hero: [], home: [], library: [], modesOnly: false });
 
 let painted = [];
 
@@ -33,7 +33,7 @@ const apply = (next) => {
   versions.ready = true;
   const colors = next.theme?.colors ?? {};
   paint(colors);
-  Object.assign(theme, { tagline: next.theme?.tagline ?? null, hero: next.theme?.hero ?? [], home: next.theme?.home ?? [], library: next.theme?.library ?? [] });
+  Object.assign(theme, { tagline: next.theme?.tagline ?? null, hero: next.theme?.hero ?? [], home: next.theme?.home ?? [], library: next.theme?.library ?? [], modesOnly: !!next.theme?.modesOnly });
   try {
     localStorage.setItem(COLORS_KEY, JSON.stringify(colors));
   } catch {}

@@ -45,7 +45,7 @@
   onMount(() => {
     settingsReady.then(() => {
       // Already playing, or set to skip this screen.
-      if (game.phase === 'running' || game.phase === 'verifying') location.replace('#/Launching');
+      if (game.title === 'game' && (game.phase === 'running' || game.phase === 'verifying' || game.phase === 'preparing')) location.replace('#/Launching');
       else autoStart = settings.alwaysUseIso && !!settings.iso;
     });
     if (!inTauri) return;

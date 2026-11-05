@@ -1,7 +1,9 @@
 //! Picking the disc image and running the game in the shipped Dolphin.
 
-use crate::mods;
 use crate::i18n::tr;
+use crate::mii;
+use crate::mods;
+use crate::rebuild;
 use crate::settings::{self, Disc, Settings, Store};
 use crate::tools;
 use crate::wiimote::Wiimotes;
@@ -9,6 +11,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::async_runtime::spawn;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -26,9 +29,12 @@ const WIIMOTE_BRIDGE: &str = "WP_WIIMOTE_BRIDGE";
 #[derive(Serialize, Clone)]
 pub struct GameState {
     /// "idle", "verifying", "problems" (damaged copy, waiting for the player's
-    /// decision), "running" or "error".
+    /// decision), "preparing" (the packages' files made from the disc, rebuild.rs),
+    /// "running" or "error".
     phase: &'static str,
     message: Option<String>,
+    /// What Dolphin runs, or ran: "game", or "miis" for the Mii Channel.
+    title: &'static str,
 }
 
 pub struct Game {
@@ -38,23 +44,40 @@ pub struct Game {
 
 impl Default for Game {
     fn default() -> Self {
-        Game { state: Mutex::new(GameState { phase: "idle", message: None }), stop: Mutex::new(None) }
+        Game { state: Mutex::new(GameState { phase: "idle", message: None, title: "game" }), stop: Mutex::new(None) }
     }
 }
 
 pub fn is_playing(app: &AppHandle) -> bool {
-    matches!(app.state::<Game>().state.lock().unwrap().phase, "verifying" | "running")
+    matches!(app.state::<Game>().state.lock().unwrap().phase, "verifying" | "preparing" | "running")
 }
 
 fn set_state(app: &AppHandle, phase: &'static str, message: Option<String>) {
-    let state = GameState { phase, message };
-    *app.state::<Game>().state.lock().unwrap() = state.clone();
-    let _ = app.emit(STATE_EVENT, state);
+    let game = app.state::<Game>();
+    let mut current = game.state.lock().unwrap();
+    *current = GameState { phase, message, title: current.title };
+    let _ = app.emit(STATE_EVENT, current.clone());
+}
+
+/// Takes Dolphin for `title`, unless it already runs something.
+fn begin(app: &AppHandle, title: &'static str, phase: &'static str) -> Result<(), String> {
+    {
+        let game = app.state::<Game>();
+        let mut state = game.state.lock().unwrap();
+        if matches!(state.phase, "verifying" | "preparing" | "running") {
+            return Err(tr!("Le jeu est déjà en cours."));
+        }
+        state.title = title;
+        state.phase = phase;
+    }
+    // Shown at once, so the screen never flashes the previous result.
+    set_state(app, phase, None);
+    Ok(())
 }
 
 /// The launcher's own environment (library paths, Qt plugins…) must not leak
 /// into Dolphin, which runs from its own folder.
-fn command(program: &Path) -> Command {
+pub fn command(program: &Path) -> Command {
     let mut cmd = Command::new(program);
     for var in ["LD_LIBRARY_PATH", "LD_PRELOAD", "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "APPDIR", "APPIMAGE"] {
         cmd.env_remove(var);
@@ -102,6 +125,7 @@ pub async fn iso_choose(app: AppHandle, path: String) -> Result<Settings, String
         s.recent.truncate(RECENT_MAX);
         s.iso = Some(disc);
     })?;
+    mii::prepare(&app);
     Ok(settings::for_ui(&app, saved))
 }
 
@@ -205,6 +229,19 @@ async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool) {
             }
         }
     }
+    // The packages' files made from the disc, the first time.
+    let packages = mods::launch_packages(&app, &settings).unwrap_or_default();
+    let packages: Vec<&mods::Installed> = packages.iter().collect();
+    if rebuild::needed(&packages) {
+        set_state(&app, "preparing", None);
+        if let Err(e) = rebuild::prepare(&app, &disc, &packages).await {
+            set_state(&app, "error", Some(e));
+            return;
+        }
+    }
+    if let Err(e) = mii::write_nand(&app) {
+        eprintln!("Mii: {e}");
+    }
     if let Err(e) = play(&app, &boot, &settings).await {
         set_state(&app, "error", Some(e));
     } else {
@@ -283,18 +320,59 @@ pub async fn game_launch(app: AppHandle, force: bool) -> Result<(), String> {
     let settings = app.state::<Store>().get(&app);
     let disc = settings.iso.clone().ok_or_else(|| tr!("Choisis d’abord ton ISO de Wii Party."))?;
     let first = if settings.verify_iso && !force { "verifying" } else { "running" };
-    {
-        let game = app.state::<Game>();
-        let mut state = game.state.lock().unwrap();
-        if matches!(state.phase, "verifying" | "running") {
-            return Err(tr!("Le jeu est déjà en cours."));
-        }
-        state.phase = first;
-    }
-    // Shown at once, so the screen never flashes the previous result.
-    set_state(&app, first, None);
+    begin(&app, "game", first)?;
     spawn(run(app, disc, settings, force));
     Ok(())
+}
+
+/// The Mii Channel, from the disc's update partition, with the library in its
+/// database; what's made there comes back to the library when it closes.
+pub async fn open_mii_channel(app: AppHandle) -> Result<(), String> {
+    if !app.state::<Wiimotes>().has_player().await {
+        return Err(tr!("Connecte au moins une Wiimote : la Chaîne Mii se joue en pointant l’écran."));
+    }
+    let settings = app.state::<Store>().get(&app);
+    let disc = settings.iso.clone().ok_or_else(|| tr!("Choisis d’abord ton ISO de Wii Party."))?;
+    begin(&app, "miis", "running")?;
+    spawn(async move {
+        let opened = async {
+            let wad = mii::disc::channel_wad(&app, &disc).await?;
+            mii::write_nand(&app)?;
+            spawn(close_after_save(app.clone()));
+            play(&app, &wad.to_string_lossy(), &settings).await
+        }
+        .await;
+        let back = mii::read_nand(&app);
+        match opened.and(back) {
+            Ok(_) => set_state(&app, "idle", None),
+            Err(e) => set_state(&app, "error", Some(e)),
+        }
+    });
+    Ok(())
+}
+
+/// The Mii Channel has no way back to the launcher: Dolphin closes once a Mii is
+/// saved, after a moment to see it done.
+async fn close_after_save(app: AppHandle) {
+    // Long enough for Dolphin and the channel to start, far too short to make a Mii.
+    const SETTLING: Duration = Duration::from_secs(15);
+    let start = Instant::now();
+    let mut watch = mii::SaveWatch::new(mii::nand_miis(&app).unwrap_or_default());
+    loop {
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        let open = {
+            let state = app.state::<Game>().state.lock().unwrap().clone();
+            state.title == "miis" && state.phase == "running"
+        };
+        if !open {
+            return;
+        }
+        if watch.saved(mii::nand_miis(&app), start.elapsed() < SETTLING) {
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            game_stop(app.state::<Game>());
+            return;
+        }
+    }
 }
 
 #[tauri::command]

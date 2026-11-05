@@ -28,30 +28,16 @@
   "hero": [
     {
       "image": "theme/tree.svg",
-      "x": 360,
-      "y": 210,
-      "size": 140
-    },
-    {
-      "image": "theme/board.svg",
-      "x": 0,
-      "y": 0,
-      "size": 550,
-      "motion": "float"
+      "x": 418,
+      "y": 262,
+      "size": 130
     },
     {
       "image": "theme/die.svg",
       "x": -18,
-      "y": 214,
+      "y": 232,
       "size": 240,
       "motion": "wobble"
-    },
-    {
-      "image": "theme/ball.svg",
-      "x": 427,
-      "y": 23,
-      "size": 100,
-      "motion": "bob"
     }
   ],
   "home": [
@@ -168,6 +154,59 @@
       "size": 24,
       "opacity": 1,
       "motion": "fall"
+    }
+  ],
+  "modesOnly": true,
+  "modes": [
+    {
+      "mode": "board-game-island",
+      "image": "theme/mode-island.png",
+      "name": {"fr": "Île hivernale", "en": "Winter Island", "es": "Isla invernal"}
+    },
+    {
+      "mode": "new-minigames",
+      "image": "theme/mode-minigames.png",
+      "name": {"fr": "9 nouveaux mini-jeux", "en": "9 new minigames", "es": "9 minijuegos nuevos"}
+    },
+    {
+      "mode": "avalanche",
+      "image": "theme/mode-avalanche.png",
+      "name": {"fr": "Cases avalanche", "en": "Avalanche spaces", "es": "Casillas de alud"}
+    },
+    {
+      "mode": "ice-cave",
+      "image": "theme/mode-cave.png",
+      "name": {"fr": "Grotte de glace", "en": "Ice Cave", "es": "Cueva de hielo"}
+    },
+    {
+      "mode": "yeti",
+      "image": "theme/mode-yeti.png",
+      "name": {"fr": "Le yéti", "en": "The Yeti", "es": "El yeti"}
+    },
+    {
+      "mode": "giant-snowball",
+      "image": "theme/mode-snowball.png",
+      "name": {"fr": "Boule de neige géante", "en": "Giant Snowball", "es": "Bola de nieve gigante"}
+    },
+    {
+      "mode": "ice-wall",
+      "image": "theme/mode-wall.png",
+      "name": {"fr": "Mur de glace", "en": "Ice Wall", "es": "Muro de hielo"}
+    },
+    {
+      "mode": "ice-die",
+      "image": "theme/mode-die.png",
+      "name": {"fr": "Dé de glace", "en": "Ice Die", "es": "Dado de hielo"}
+    },
+    {
+      "mode": "ice-bridges",
+      "image": "theme/mode-bridges.png",
+      "name": {"fr": "Ponts de glace", "en": "Ice Bridges", "es": "Puentes de hielo"}
+    },
+    {
+      "mode": "glacier-sanctuary",
+      "image": "theme/mode-sanctuary.png",
+      "name": {"fr": "Sanctuaire du glacier", "en": "Sanctuary of the Glacier", "es": "Santuario del glaciar"}
     }
   ]
 }

@@ -4,4 +4,4 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/tools/
 src-tauri/.tools-cache/
-src-tauri/versions/*.wpver
+.claude/worktrees/

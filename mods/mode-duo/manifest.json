@@ -1,0 +1,23 @@
+{
+  "name": { "fr": "Mode Duo", "en": "Duo Mode", "es": "Modo Dúo" },
+  "description": {
+    "fr": "L’Île aux défis en 2 contre 2 : une équipe bleue, une équipe rouge. Une équipe gagne quand ses deux joueurs ont réussi le défi final et cassent le mur ensemble. Les équipes se choisissent dans les réglages.",
+    "en": "Board Game Island as a 2 vs 2: a blue team and a red team. A team wins when both of its players pass the final challenge and break the wall together. Choose the teams in the settings.",
+    "es": "La Isla Aventura en 2 contra 2: un equipo azul y un equipo rojo. Un equipo gana cuando sus dos jugadores superan el desafío final y rompen el muro juntos. Los equipos se eligen en los ajustes."
+  },
+  "settings": [
+    {
+      "id": "equipes",
+      "type": "choice",
+      "label": { "fr": "Équipes", "en": "Teams", "es": "Equipos" },
+      "description": { "fr": "Qui joue avec qui", "en": "Who plays with whom", "es": "Quién juega con quién" },
+      "default": 0,
+      "choices": [
+        { "value": 0, "label": { "fr": "J1 + J3 contre J2 + J4", "en": "P1 + P3 vs P2 + P4", "es": "J1 + J3 contra J2 + J4" } },
+        { "value": 1, "label": { "fr": "J1 + J2 contre J3 + J4", "en": "P1 + P2 vs P3 + P4", "es": "J1 + J2 contra J3 + J4" } },
+        { "value": 2, "label": { "fr": "J1 + J4 contre J2 + J3", "en": "P1 + P4 vs P2 + P3", "es": "J1 + J4 contra J2 + J3" } }
+      ],
+      "memory": { "offset": "0x80001804", "size": 1 }
+    }
+  ]
+}

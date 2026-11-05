@@ -123,6 +123,66 @@ Jouer → choix de l'ISO → vérification → Dolphin (`src-tauri/src/game.rs`,
   dans le dossier de configuration de l'application. Le démarrage automatique vit dans l'entrée
   système du plugin autostart : `settings.json` n'en garde qu'une copie pour l'affichage.
 
+## Compte et Mii
+
+Au premier lancement, l'écran Bienvenue (`src/screens/Welcome.svelte`) crée le compte du joueur : un
+Mii (un Mii de Wii Party tiré au sort, proposé d'office) et un pseudo. Tant que le joueur n'a rien
+tapé, le pseudo suit le nom du Mii choisi (Matt, Shinnosuke…), ou celui du système sans Mii. « C'est
+parti » suffit donc, mais on peut aussi importer un fichier Mii, en choisir
+un autre ou le créer dans la Chaîne Mii. Le compte (`player` : pseudo et ID du Mii) est dans
+`settings.json`. Sa tête et son pseudo remplacent le logo, dans la barre latérale et sur l'accueil.
+« Mes Mii » (`src/screens/Miis.svelte`) gère la bibliothèque : renommer, exporter en `.mii`, supprimer,
+choisir son Mii.
+
+Tout vient de l'ISO du joueur. Le launcher ne livre rien de Nintendo (`src-tauri/src/mii/disc.rs`) :
+
+- `RFL/Resource/RFLRes01.arc.lz` donne `RFL_Res.dat`, les pièces de visage avec lesquelles
+  `mii/render.rs` dessine les têtes (PNG gardés dans `<données>/miis/heads`) ;
+- `RFL/RSD/mii_rsd.bin.lz` donne les 100 Mii du jeu, et `locale/*/mess.bin` leurs noms (clés
+  `store000`…, Matt, Shinnosuke…). En choisir un en fait une copie au nom du joueur,
+  avec un nouvel ID ;
+- la partition de mise à jour donne la Chaîne Mii (`_sys/RVL-NigaoeNR-v*.wad`), que Dolphin démarre
+  directement. Un `.wbfs` n'a souvent plus cette partition.
+
+Ces fichiers sont extraits avec `dolphin-tool`, une fois, dans `<données>/rfl`, dès qu'un ISO est choisi.
+
+La bibliothèque (`<données>/miis/library.json`, 100 Mii au plus comme sur la Wii) est recopiée dans la
+base Mii du NAND de Dolphin (`Wii/shared2/menu/FaceLib/RFL_DB.dat`, `src-tauri/src/mii/data.rs`) avant
+chaque lancement du jeu ou de la Chaîne Mii, le Mii du joueur en premier. Wii Party les propose ainsi
+comme sur une vraie Wii. La Chaîne Mii n'a pas de retour vers le launcher : pendant qu'elle tourne, le
+launcher surveille la base et ferme Dolphin dès qu'un Mii y est enregistré (après 15 s de démarrage,
+pendant lesquelles la chaîne peut réécrire sa base). Les Mii créés ou modifiés rejoignent alors la
+bibliothèque. Un Mii supprimé dans la chaîne reste dans la bibliothèque : seul le launcher la vide.
+Le format de la base suit le RFL décompilé (`wp/src/RVLFaceLib`), et une base vide écrite par le
+launcher est identique, octet pour octet, à celle que crée la Chaîne Mii.
+
+Fichiers importés : `.mii`, `.miigx` et `.rcd` (74 octets), `.rsd` (76, avec CRC), plusieurs `.rsd`
+mis bout à bout, ou un `RFL_DB.dat` entier (tous ses Mii). Les Mii de 3DS, Wii U et Switch ne sont pas
+convertis.
+
+## Modes de jeu de l'accueil
+
+Le cadre de l'accueil fait défiler les modes du jeu (Île aux défis, Globe-trotter, Roue de la chance…),
+avec leur vignette et leur nom tels que le menu principal les montre (`src-tauri/src/modes.rs`,
+`src/components/ModeShow.svelte`). Eux aussi viennent de l'ISO, dans la langue du launcher (`sp_EU`
+pour l'espagnol, sinon l'anglais) : les vignettes de `locale/*/layout/inst/thumbnail.arc.lz` (TPL
+160×120) et les noms de `locale/*/mess.bin` (clés `mn_gtex013`…). Ces deux fichiers sont gardés dans
+`<données>/rfl/modes`. Le dé reste à côté du cadre.
+
+Les vignettes du disque sont petites : pour 11 des 13 modes, le launcher montre à la place ses propres
+captures, plus grandes (`src/assets/modes/<mode>.jpg`, 640×480). Contrairement au reste, celles-là sont
+livrées avec le launcher. Trios de Mii et Tic-tac... réponse gardent la vignette de l'ISO. Sans ISO, le
+cadre montre ces 11 captures avec leurs noms traduits dans `src/locales`.
+
+La version active les change de deux façons :
+
+- en remplaçant ces fichiers dans ses patchs Riivolution, comme dans le jeu : le launcher lit alors les
+  siens, et une vignette changée passe devant sa capture ;
+- avec `modes` dans son thème (voir Versions), pour des images faites pour le launcher, montrées en
+  premier (ou seules, avec `modesOnly`). Mode Hiver ne montre que dix plans de ses parties
+  (`themes/mode-hiver/mode-*.png`) : Île hivernale, 9 nouveaux mini-jeux, cases avalanche, grotte de glace, yéti, boule de neige géante, mur de glace, dé de
+  glace, ponts de glace, Sanctuaire du glacier.
+
 ## Mods
 
 Le launcher n'accepte que les `.wpmod`, déposés dans la Bibliothèque ou choisis avec « Parcourir »
@@ -154,12 +214,41 @@ Un `.wpmod` est un zip avec un `mod.json` à la racine :
 
 - Seuls `format`, `id`, `name`, `version`, `games` et `patches` sont obligatoires. Une plage de versions
   vaut `*` ou `>=x.y`.
-- `riivolution` est le seul type de patch pris en charge pour l'instant : un mod Gecko est refusé.
+- `"launcher": ">=0.2"` : les versions du launcher qu'il lui faut. Un launcher plus ancien le refuse en
+  demandant d'être mis à jour (Paramètres › À propos), avant même de regarder son format ou ses patchs :
+  c'est ce qui permet d'ajouter des types de patch sans casser les anciens launchers.
+- Types de patch : `riivolution` (il en faut au moins un) et `delta` (ci-dessous). Un mod Gecko est refusé.
 - `options` dit quelles options du XML activer (`choice` compte à partir de 1). La racine Riivolution
   est celle du paquet.
 - `scripts/make-wpmod.py` fabrique un `.wpmod` à partir d'un paquet Riivolution.
 - `scripts/riivolution-from-disc.py` fabrique ce paquet à partir d'une copie modifiée du disque extrait.
   Un `main.dol` modifié y entre en `<file disc="main.dol">` : Dolphin le comprend, pas une vraie Wii.
+
+### Deltas : pas de fichier du jeu dans le paquet
+
+Un patch `delta` liste des fichiers du paquet que le launcher fabrique à partir de l'ISO du joueur, au
+premier lancement (`src-tauri/src/rebuild.rs`, phase « preparing » de l'écran de lancement) :
+
+```json
+{ "type": "delta", "files": [
+    { "disc": "/rel/mr001.rel.lz", "file": "WinterMode/rel/mr001.rel.lz", "delta": "delta/WinterMode/rel/mr001.rel.lz.wpd" },
+    { "disc": "main.dol", "file": "WinterMode/sys/main.dol", "delta": "delta/WinterMode/sys/main.dol.wpd" } ] }
+```
+
+- `disc` : le fichier d'origine (`main.dol` : l'exécutable, que `dolphin-tool extract -s sys/main.dol` sait
+  sortir dans notre fork). `file` : où le résultat va dans le paquet, là où son XML Riivolution l'attend.
+- Un `.wpd` (`src-tauri/src/delta.rs`) : `WPD1`, un octet d'options (1 : `.lz`), le SHA-256 du fichier
+  d'origine et celui du résultat, puis un patch bsdiff 4.x. Pour un `.lz`, le delta est fait entre les
+  contenus décompressés, et le launcher recompresse (`src-tauri/src/lz.rs`, LZ77 type 0x11) : un delta
+  entre deux fichiers compressés serait aussi gros que le fichier.
+- Un ISO dont le fichier n'est pas celui d'origine (autre région, disque moddé) est refusé avec un message
+  clair. Les fichiers faits restent dans le dossier du paquet ; une mise à jour du paquet les refait.
+- `scripts/make-wpmod.py … --disc <image du disque d'origine>` fait les deltas tout seul : chaque fichier
+  du paquet qui remplace un fichier du disque devient un delta (`src-tauri/examples/wpdelta.rs`, vérifié
+  en le réappliquant), et le paquet demande `"launcher": ">=0.2"`. Mode Hiver : 135 Mo → 38 Mo, sans plus
+  aucun fichier du jeu ; 183 fichiers refaits en ~9 s.
+- Test réel : `WP_TEST_PACKAGE=… WP_TEST_ISO=… WP_TEST_FILES=<fichiers d'origine du paquet> cargo test
+  --release makes_a_package_again -- --ignored`.
 
 Au lancement, le launcher écrit un descripteur de mod Dolphin (`mods/.launch.json`) qui pointe vers
 l'ISO et les mods activés : l'ISO n'est pas modifié. Les mods s'appliquent dans l'ordre d'activation.
@@ -215,6 +304,20 @@ enregistrés dans les paramètres du launcher et s'appliquent au lancement suiva
   démarrage du jeu. C'est au code du mod (dans son `main.dol`) de la lire. Le launcher l'écrit par un XML
   Riivolution qu'il génère (`mods/.settings-<id>.xml`).
 - Une valeur enregistrée que le paquet ne permet plus (après une mise à jour) revient à `default`.
+- Un préréglage est un `choice` dont les choix règlent d'autres réglages d'un coup, sans option
+  Riivolution ni `memory` :
+
+  ```json
+  { "id": "difficulte", "type": "choice", "label": "Difficulté", "default": 1, "choices": [
+      { "value": 0, "label": "Douce", "sets": { "yeti": 25, "mur": 3 } },
+      { "value": 1, "label": "Normale", "sets": { "yeti": 50, "mur": 4 } },
+      { "value": 2, "label": "Personnalisée" } ] }
+  ```
+
+  Sa valeur n'est pas enregistrée : c'est le premier choix dont les `sets` correspondent aux autres
+  réglages, sinon le seul choix sans `sets` (personnalisé, proposé seulement quand c'est lui). Changer un
+  réglage qu'il règle le fait donc passer à « Personnalisée ». Son `default` doit être le choix que
+  donnent les valeurs par défaut.
 - La vérification de compatibilité tient compte des valeurs choisies : un réglage désactivé ne compte pas.
 
 ### Vérification de compatibilité
@@ -248,15 +351,24 @@ Les conflits et les prérequis des mods s'appliquent aussi à la version active.
   "tagline": "La phrase sous le titre de l'accueil",
   "hero": [{ "image": "theme/board.svg", "x": 0, "y": 0, "size": 550, "motion": "float" }],
   "home": [{ "image": "theme/flake.svg", "x": 600, "y": 70, "size": 34, "opacity": 1, "motion": "fall" }],
-  "library": []
+  "library": [],
+  "modes": [{ "mode": "board-game-island", "image": "theme/ile-hivernale.png", "name": { "fr": "Île hivernale" } }]
 }
 ```
 
 - `colors` : les variables CSS du launcher, `#rrggbb` (`shadow` et `scrim` : trois nombres). Une couleur
   absente garde sa valeur de `src/app.css`.
-- `hero` : l'illustration de l'accueil, une image par partie qui bouge, dans un cadre de 550×460. `home` et
+- `hero` : ce qui bouge autour du cadre des modes de l'accueil, dans une zone de 550×460 dont le cadre
+  occupe à peu près (90, 66)–(482, 372). Il remplace le dé du launcher. `home` et
   `library` : des images posées derrière ces écrans, en coordonnées d'un écran 1280×720. Images SVG ou PNG de
   2 Mo au plus.
+- `modes` (facultatif) : l'image d'un mode du jeu (`board-game-island`, `globe-trot`, `mii-of-a-kind`,
+  `spin-off`, `bingo`, `friend-connection`, `balance-boat`, `match-up`, `animal-tracker`, `hide-n-hunt`,
+  `time-bomb`, `word-bomb`, `buddy-quiz`), en 4:3, à la place de celle de l'ISO, et son nom si `name` est
+  donné. Un autre identifiant ajoute un mode de la version : il lui faut un `name`. Ces images passent
+  avant les autres modes, dans l'ordre du thème.
+- `modesOnly` (facultatif) : `true` pour ne montrer que les `modes` du thème, aucun de ceux du jeu.
+  Chacun doit alors avoir un `name`.
 - `motion` (facultatif) : `fall`, `float`, `wobble` ou `bob`, les mouvements de `src/app.css`.
 - `tagline` (facultatif) : une phrase, ou la même par langue du launcher, `{ "fr": "…", "en": "…", "es": "…" }`.
   Une langue absente prend l'anglais, puis le français.
@@ -267,14 +379,53 @@ Les `.wpver` de `src-tauri/versions/` sont fournis avec le launcher : installés
 remplacés seulement si le launcher en apporte une version plus récente. Ils ne peuvent pas être retirés.
 Une nouvelle installation démarre sur `prstance.mode-hiver`.
 
-`src-tauri/versions/*.wpver` n'est pas versionné : le paquet contient des fichiers du jeu. Pour le refaire :
+`src-tauri/versions/*.wpver` est versionné (la CI de release l'embarque) : fait avec `--disc`, il ne
+contient plus aucun fichier du jeu, seulement des deltas et les fichiers propres au mod. Pour refaire
+Mode Hiver depuis wp-winter (branche `mod/winter`) :
+
+1. Dans wp-winter, `WINTER_DEBUG` à 0 (`include/wp/mr001/winter.h`), puis `ninja` (tout, pas seulement
+   les RELs modifiés : le mode ajoute du code à `main.dol`, donc chaque REL doit être relié au nouveau).
+2. `python3 scripts/winter-settings.py ../wp-winter/build/SUPP01` (ici) : l'adresse des réglages du mode
+   (`gWinterSettings`, dans `main.dol`) change à chaque build ; le script la reporte dans
+   `themes/mode-hiver/manifest.json` et vérifie que `main.dol` y a bien les valeurs par défaut.
+3. `python3 tools/make_riivolution.py --no-build`. Son paquet ne met pas `main.dol` ni les RELs que le
+   projet ne compile pas : il faut les ajouter comme `tools/run_dolphin.py` les installe, `main.dol` en
+   `<file disc="main.dol" external="sys/main.dol" />` (Dolphin seulement) et les autres RELs reliés par
+   `tools/relink_disc_rels.py`. Sinon le jeu plante dès qu'un module arrive.
+4. Sans `LISEZ-MOI.txt` ni `README.txt` (l'installation sur Wii), on en fait la version :
 
 ```sh
-python3 scripts/make-wpmod.py paquet-riivolution.zip --id prstance.mode-hiver --name "Mode Hiver" \
-    --version 2026.11.6 --game SUPP01 --author prstance --conflicts prstance.mode-duo='*' \
-    --conflicts prstance.mode-lave='*' --theme themes/mode-hiver \
-    --out src-tauri/versions/Mode-Hiver-2026.11.6.wpver
+python3 scripts/make-wpmod.py dist/WinterMode --id prstance.mode-hiver --name "Mode Hiver" \
+    --version 2026.11.12 --game SUPP01 --author prstance --conflicts prstance.mode-duo='*' \
+    --conflicts prstance.mode-lave='*' --extra ../wp-winter/mods/winter/CREDITS.md \
+    --theme themes/mode-hiver --disc "chemin/Wii Party (Europe).rvz" \
+    --out src-tauri/versions/Mode-Hiver-2026.11.12.wpver
 ```
+
+Le nom, la description par langue et les réglages (difficulté, yéti, sceau, mur, corde, mini-jeux d'hiver,
+tempête, tenues, bonnets) viennent de `themes/mode-hiver/manifest.json` (pris d'office avec `--theme`, sauf
+si `--manifest` en donne un autre). Le détail de chaque réglage côté jeu est dans wp-winter,
+`docs/winter_mode.md` › « Réglages du launcher ».
+
+## Mises à jour du launcher
+
+Paramètres › À propos › « Rechercher une mise à jour » (`src-tauri/src/update.rs`, plugin updater de Tauri) :
+le launcher lit `latest.json` de la dernière release de **prstance/wp-launcher** (dépôt public qui ne
+contient qu'un README et les releases), télécharge l'installateur de son système, vérifie sa signature,
+l'installe et redémarre. Rien n'est vérifié tout seul : seulement quand le joueur clique. Sous Linux,
+seule l'AppImage sait se mettre à jour (un `.deb` / `.rpm` passe par le gestionnaire de paquets).
+
+- Signature : la clé publique est dans `tauri.conf.json` (`plugins.updater.pubkey`), la clé privée dans
+  `~/.tauri/partylauncher.key`, **à sauvegarder** : sans elle, plus aucune mise à jour ne sera acceptée
+  par les launchers déjà installés. `npm run tauri build` en local demande
+  `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/partylauncher.key)"` (ou `--config
+  '{"bundle":{"createUpdaterArtifacts":false}}'` pour un build non publié).
+- Publier : changer `version` dans `tauri.conf.json`, `Cargo.toml` et `package.json`, puis pousser un tag
+  `v<version>` sur le dépôt (privé) du code. `.github/workflows/release.yml` construit les trois systèmes
+  et publie la release dans prstance/wp-launcher avec `latest.json`. Secrets du dépôt du code :
+  `RELEASES_TOKEN` (un jeton qui peut écrire les releases de prstance/wp-launcher) et
+  `TAURI_SIGNING_PRIVATE_KEY` (le contenu de la clé privée). Les `.wpver` livrés doivent être dans le
+  dépôt du code : faits avec `--disc`, ils ne contiennent plus de fichier du jeu.
 
 ## Langues
 
@@ -301,4 +452,7 @@ node scripts/check-i18n.mjs   # liste les traductions manquantes ou inutilisées
 
 La fenêtre est sans bordure système (`decorations: false`) : l'en-tête de chaque écran et une fine
 bande en haut servent à la déplacer. Les écrans sont dessinés en 1280×720 et mis à l'échelle
-pour remplir la fenêtre.
+pour remplir la fenêtre. Elle reste toujours en 16:9 (`src-tauri/src/window.rs`) : taille fixe, non
+redimensionnable à la main, si bien que les gestionnaires en mosaïque (Hyprland, Sway…) l'ouvrent
+flottante par-dessus les autres. Agrandir alterne entre 1280×720 (réduit si l'écran est petit) et
+95 % de l'écran.

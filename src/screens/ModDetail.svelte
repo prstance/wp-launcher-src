@@ -58,9 +58,18 @@
       await refreshMods();
     });
 
+  /** A preset's choice gives its values to the settings it sets (its own value comes back from them). */
   const change = (setting, value) => {
     setting.value = value;
+    const sets = setting.choices.find((c) => c.value === value)?.sets ?? {};
+    for (const s of detail.settings) if (s.id in sets) s.value = sets[s.id];
     save(Object.fromEntries(detail.settings.map((s) => [s.id, s.value])));
+  };
+
+  /** A preset's "custom" choice (no `sets`) is only shown while it is the one. */
+  const offered = (s) => {
+    const preset = s.choices.some((c) => c.sets);
+    return s.choices.filter((c) => !preset || c.sets || c.value === s.value).map((c) => [c.value, local(c.label)]);
   };
 
   const step = (setting, direction) => {
@@ -102,7 +111,7 @@
     {#if s.type === 'toggle'}
       <button type="button" role="switch" aria-checked={!!s.value} aria-label={local(s.label)} disabled={busy} onclick={() => change(s, s.value ? 0 : 1)} style="position: relative; flex-shrink: 0; width: 52px; height: 30px; border: 0; border-radius: 999px; cursor: pointer; background: {s.value ? '#25a720' : 'var(--off)'};"><span style="position: absolute; top: 4px; left: {s.value ? 26 : 4}px; width: 22px; height: 22px; border-radius: 999px; background: #ffffff; box-shadow: 0 2px 0 rgba(0,0,0,0.15);"></span></button>
     {:else if s.type === 'choice'}
-      <Select label={local(s.label)} value={s.value} options={s.choices.map((c) => [c.value, local(c.label)])} onchange={(v) => change(s, v)} />
+      <Select label={local(s.label)} value={s.value} options={offered(s)} onchange={(v) => change(s, v)} />
     {:else}
       <span role="group" aria-label={local(s.label)} style="flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 12px; background: var(--surface);">
         <button type="button" class="step" aria-label={t('Moins')} disabled={busy || s.value <= (s.min ?? -Infinity)} onclick={() => step(s, -1)}>−</button>

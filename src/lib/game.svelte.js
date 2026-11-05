@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "./tauri.js";
 
-/** phase: "idle" | "verifying" | "problems" | "running" | "error" */
-export const game = $state({ phase: "idle", message: null });
+/** phase: "idle" | "verifying" | "problems" | "preparing" | "running" | "error"
+ *  title: what Dolphin runs, "game" or "miis" (the Mii Channel). */
+export const game = $state({ phase: "idle", message: null, title: "game" });
 
 if (inTauri) {
   listen("game://state", (e) => Object.assign(game, e.payload));

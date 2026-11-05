@@ -26,6 +26,8 @@
       meta: settings.iso?.name ?? t('Aucun ISO choisi'),
       ...(game.phase === 'verifying'
         ? now()
+        : game.phase === 'preparing'
+          ? ok(settings.verifyIso ? t('OK') : t('Passée'))
         : game.phase === 'problems'
           ? bad(t('Anomalies'))
           : !settings.iso
@@ -97,6 +99,9 @@
 
       {#if game.phase === 'verifying'}
         <div role="progressbar" aria-label={t('Vérification de l’ISO')} class="bar"><div></div></div>
+      {:else if game.phase === 'preparing'}
+        <div role="progressbar" aria-label={t('Préparation des fichiers')} class="bar"><div></div></div>
+        <p role="status" style="margin: 0; font-size: 13px; font-weight: 700; color: var(--muted);">{t('Première fois avec cette version : ses fichiers sont fabriqués à partir de ton ISO.')}</p>
       {:else if game.message || error}
         <p role="alert" style="margin: 0; padding: 12px 16px; border-radius: 20px; background: #fde0e0; font-size: 14px; line-height: 21px; font-weight: 700; color: #7a1424; overflow-wrap: anywhere;">{game.message ?? error}</p>
       {:else if running}
@@ -122,7 +127,7 @@
       <div style="margin-left: auto; display: flex; align-items: center; gap: 14px;">
         {#if running}
           {@render primary(t('Arrêter le jeu'), stop)}
-        {:else if game.phase !== 'verifying'}
+        {:else if game.phase !== 'verifying' && game.phase !== 'preparing'}
           {#if game.phase === 'problems'}
             <button type="button" onclick={otherIso} style="height: 48px; padding: 0 18px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; background: var(--surface); font-size: 15px; font-weight: 800; color: var(--text);">{t('Autre ISO')}</button>
           {/if}

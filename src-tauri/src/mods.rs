@@ -49,6 +49,9 @@ pub struct Manifest {
     #[serde(default)]
     pub description: Text,
     pub games: Vec<String>,
+    /// The launcher versions it needs, ">=0.2": an older one asks to be updated.
+    #[serde(default)]
+    launcher: Option<String>,
     /// SVG or PNG inside the package.
     #[serde(default)]
     icon: Option<String>,
@@ -66,14 +69,34 @@ pub struct Manifest {
     pub theme: Option<Theme>,
 }
 
+/// "riivolution": an XML of the package and the options it turns on. "delta": the
+/// package's files to make from the player's disc before a launch (rebuild.rs).
 #[derive(Deserialize, Clone)]
-struct Patch {
+pub struct Patch {
     #[serde(rename = "type")]
     kind: String,
     #[serde(default)]
     xml: String,
     #[serde(default)]
     options: Vec<Choice>,
+    #[serde(default)]
+    pub files: Vec<DeltaFile>,
+}
+
+/// A file of the package (`file`, which its Riivolution XML names) made from the
+/// disc's `disc` ("/rel/mr001.rel.lz", or "main.dol") by `delta` (delta.rs).
+#[derive(Deserialize, Clone)]
+pub struct DeltaFile {
+    pub disc: String,
+    pub file: String,
+    pub delta: String,
+}
+
+impl Manifest {
+    /// The files the package makes from the disc.
+    pub fn deltas(&self) -> impl Iterator<Item = &DeltaFile> {
+        self.patches.iter().filter(|p| p.kind == "delta").flat_map(|p| &p.files)
+    }
 }
 
 /// One Riivolution option to turn on. `choice` counts from 1, as in Dolphin.
@@ -86,7 +109,9 @@ struct Choice {
 
 /// One thing the player can choose. Its value (a number: 0/1 for a toggle) either
 /// picks a choice of a Riivolution option of the package, or is written in the
-/// game's memory for the package's own code to read.
+/// game's memory for the package's own code to read. A preset is a choice whose
+/// choices set other settings (`sets`): its value is the first choice that
+/// matches them, or the one without `sets` (custom).
 #[derive(Deserialize, Clone)]
 struct Setting {
     id: String,
@@ -118,6 +143,9 @@ struct Setting {
 struct SettingChoice {
     value: i64,
     label: Text,
+    /// A preset's: the values it gives other settings.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    sets: BTreeMap<String, i64>,
 }
 
 /// A Riivolution option of one of the package's XML. A toggle turns on its choice
@@ -163,6 +191,16 @@ impl Slot {
 }
 
 impl Setting {
+    fn is_preset(&self) -> bool {
+        self.kind == "choice" && self.choices.iter().any(|c| !c.sets.is_empty())
+    }
+
+    /// A preset's value with the other settings at `values`.
+    fn preset_value(&self, values: &BTreeMap<String, i64>) -> i64 {
+        let matches = |c: &&SettingChoice| !c.sets.is_empty() && c.sets.iter().all(|(id, v)| values.get(id) == Some(v));
+        self.choices.iter().find(matches).or_else(|| self.choices.iter().find(|c| c.sets.is_empty())).map_or(self.default, |c| c.value)
+    }
+
     fn allows(&self, value: i64) -> bool {
         match self.kind.as_str() {
             "toggle" => value == 0 || value == 1,
@@ -219,6 +257,7 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
         return fail(tr!("sa valeur par défaut n’est pas permise"));
     }
     match (&setting.riivolution, &setting.memory) {
+        _ if setting.is_preset() => check_preset(m, setting).or_else(fail)?,
         (Some(binding), None) if setting.kind != "number" => {
             let Some(patch) = m.patches.iter().find(|p| p.xml == binding.xml) else {
                 return fail(tr!("{xml} n’est pas un patch du paquet", xml = binding.xml));
@@ -252,6 +291,25 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
     Ok(())
 }
 
+fn check_preset(m: &Manifest, preset: &Setting) -> Result<(), String> {
+    if preset.riivolution.is_some() || preset.memory.is_some() {
+        return Err(tr!("un préréglage ne choisit rien lui-même : ni option Riivolution, ni emplacement en mémoire"));
+    }
+    if preset.choices.iter().filter(|c| c.sets.is_empty()).count() != 1 {
+        return Err(tr!("il faut à un préréglage un seul choix sans « sets » (personnalisé)"));
+    }
+    for (id, value) in preset.choices.iter().flat_map(|c| &c.sets) {
+        if !m.settings.iter().any(|s| &s.id == id && !s.is_preset() && s.allows(*value)) {
+            return Err(tr!("il règle « {id} » sur {value}, que ce réglage ne permet pas", id = id, value = value));
+        }
+    }
+    let defaults = m.settings.iter().map(|s| (s.id.clone(), s.default)).collect();
+    if preset.preset_value(&defaults) != preset.default {
+        return Err(tr!("sa valeur par défaut n’est pas celle que donnent les autres réglages par défaut"));
+    }
+    Ok(())
+}
+
 /// What a mod changes in the game.
 #[derive(Default)]
 pub struct Footprint {
@@ -260,6 +318,15 @@ pub struct Footprint {
     memory: Vec<(u32, Vec<u8>)>,
     /// It also does things that can't be told from its files.
     partial: bool,
+    /// The package's file that replaces a disc file, by lowercase disc path.
+    sources: BTreeMap<String, PathBuf>,
+}
+
+impl Footprint {
+    /// The package's file that replaces `disc` ("/layout/inst/thumbnail.arc.lz"), if any.
+    pub fn source(&self, disc: &str) -> Option<&Path> {
+        self.sources.get(&disc_path(disc)).map(PathBuf::as_path)
+    }
 }
 
 pub struct Installed {
@@ -348,6 +415,15 @@ pub fn satisfies(version: &str, range: &str) -> bool {
 }
 
 fn validate(m: &Manifest) -> Result<(), String> {
+    // (first: a newer package may have a format or patches this launcher doesn't know)
+    if let Some(range) = &m.launcher {
+        if !range_is_valid(range) {
+            return Err(tr!("la plage de versions « {range} » n’est pas valide", range = range));
+        }
+        if !satisfies(env!("CARGO_PKG_VERSION"), range) {
+            return Err(tr!("il demande une version plus récente du launcher ({range}) : mets PartyLauncher à jour dans Paramètres › À propos", range = range));
+        }
+    }
     if m.format != FORMAT {
         return Err(tr!("ce paquet utilise le format {format}, que ce launcher ne connaît pas", format = m.format));
     }
@@ -368,8 +444,11 @@ fn validate(m: &Manifest) -> Result<(), String> {
     if m.patches.is_empty() {
         return Err(tr!("il ne contient aucun patch"));
     }
-    if let Some(patch) = m.patches.iter().find(|p| p.kind != "riivolution") {
+    if let Some(patch) = m.patches.iter().find(|p| p.kind != "riivolution" && p.kind != "delta") {
         return Err(tr!("ce launcher ne sait pas encore charger les patchs « {kind} »", kind = patch.kind));
+    }
+    if !m.patches.iter().any(|p| p.kind == "riivolution") || m.patches.iter().any(|p| p.kind == "delta" && p.files.is_empty()) {
+        return Err(tr!("il ne contient aucun patch"));
     }
     for setting in &m.settings {
         check_setting(m, setting)?;
@@ -499,7 +578,12 @@ fn read_riivolution(package: &Path, patch: &Patch, settings: &[&Setting], values
             }
             match node.tag_name().name() {
                 "file" => match node.attribute("disc") {
-                    Some(disc) if disc.starts_with('/') => footprint.files.push(disc_path(disc)),
+                    Some(disc) if disc.starts_with('/') => {
+                        if let Some(from) = node.attribute("external") {
+                            footprint.sources.insert(disc_path(disc), external(package, patch_root, from));
+                        }
+                        footprint.files.push(disc_path(disc))
+                    }
                     // Dolphin's way of replacing the game's executable.
                     Some(disc) if disc.eq_ignore_ascii_case("main.dol") => footprint.files.push(disc_path(disc)),
                     _ => footprint.partial = true,
@@ -509,9 +593,12 @@ fn read_riivolution(package: &Path, patch: &Patch, settings: &[&Setting], values
                         let from = external(package, patch_root, from);
                         let mut found = Vec::new();
                         files_below(&from, &mut found);
-                        footprint.files.extend(found.iter().filter_map(|f| {
-                            Some(disc_path(&format!("{disc}/{}", f.strip_prefix(&from).ok()?.to_string_lossy())))
-                        }));
+                        for file in found {
+                            let Ok(inside) = file.strip_prefix(&from) else { continue };
+                            let path = disc_path(&format!("{disc}/{}", inside.to_string_lossy()));
+                            footprint.files.push(path.clone());
+                            footprint.sources.insert(path, file);
+                        }
                     }
                     _ => footprint.partial = true,
                 },
@@ -537,7 +624,7 @@ fn read_riivolution(package: &Path, patch: &Patch, settings: &[&Setting], values
 
 fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String, i64>) -> Result<Footprint, String> {
     let mut footprint = Footprint::default();
-    for patch in &manifest.patches {
+    for patch in manifest.patches.iter().filter(|p| p.kind == "riivolution") {
         let bound: Vec<&Setting> = manifest.settings.iter().filter(|s| s.riivolution.as_ref().is_some_and(|b| b.xml == patch.xml)).collect();
         read_riivolution(package, patch, &bound, values, &mut footprint)?;
     }
@@ -559,11 +646,31 @@ fn read_manifest(kind: &Kind, text: &str) -> Result<Manifest, String> {
 
 /// The settings' values: the saved ones, or the defaults.
 fn resolve(manifest: &Manifest, saved: &Values) -> BTreeMap<String, i64> {
-    manifest.settings.iter().map(|s| (s.id.clone(), s.value(saved.get(&manifest.id)))).collect()
+    let mut values: BTreeMap<String, i64> = manifest.settings.iter().filter(|s| !s.is_preset()).map(|s| (s.id.clone(), s.value(saved.get(&manifest.id)))).collect();
+    let presets: Vec<_> = manifest.settings.iter().filter(|s| s.is_preset()).map(|s| (s.id.clone(), s.preset_value(&values))).collect();
+    values.extend(presets);
+    values
+}
+
+/// Each delta is in the package, and makes one of its files from a file of the disc.
+fn check_deltas(package: &Path, manifest: &Manifest) -> Result<(), String> {
+    for d in manifest.deltas() {
+        let disc_ok = d.disc.starts_with('/') || d.disc.eq_ignore_ascii_case("main.dol");
+        if !disc_ok || !is_inside(&d.file) || !is_inside(&d.delta) || d.file.trim_matches('/').is_empty() {
+            return Err(tr!("son delta « {delta} » n’est pas valide", delta = d.delta));
+        }
+        let mut head = [0u8; 69];
+        let read = File::open(package.join(&d.delta)).and_then(|mut f| f.read_exact(&mut head));
+        if read.is_err() || crate::delta::source_hash(&head).is_err() {
+            return Err(tr!("son delta « {delta} » est introuvable ou abîmé", delta = d.delta));
+        }
+    }
+    Ok(())
 }
 
 fn read_contents(kind: &Kind, package: &Path, manifest: &Manifest, values: &BTreeMap<String, i64>) -> Result<Footprint, String> {
     (kind.check)(package, manifest)?;
+    check_deltas(package, manifest)?;
     if let Some(icon) = &manifest.icon {
         check_image(package, icon, MAX_ICON)?;
     }
@@ -756,6 +863,18 @@ fn state(dir: &Path, version: Option<&Installed>, settings: &Settings) -> ModsSt
         })
         .collect();
     ModsState { mods: views, version: version.map(|v| v.manifest.name.clone()), problems }
+}
+
+/// The packages the game starts with, in their order (rebuild.rs).
+pub fn launch_packages(app: &AppHandle, settings: &Settings) -> Result<Vec<Installed>, String> {
+    let mut mods = installed(&WPMOD, &data_dir(app, "mods")?, &settings.package_settings);
+    let mut order: Vec<Installed> = versions::active(app, settings)?.into_iter().collect();
+    for id in &settings.enabled_mods {
+        if let Some(at) = mods.iter().position(|m| &m.manifest.id == id) {
+            order.push(mods.remove(at));
+        }
+    }
+    Ok(order)
 }
 
 /// What Dolphin boots: its description of the disc with the active version and
@@ -1043,6 +1162,8 @@ pub async fn package_settings_set(app: AppHandle, id: String, values: BTreeMap<S
             return Err(tr!("La valeur {value} n’est pas permise pour « {setting} ».", value = value, setting = key));
         }
     }
+    // (a preset's value comes from the others)
+    let values: BTreeMap<String, i64> = values.into_iter().filter(|(key, _)| package.manifest.settings.iter().any(|s| &s.id == key && !s.is_preset())).collect();
     app.state::<Store>().update(&app, |s| {
         if values.is_empty() {
             s.package_settings.remove(&id);
@@ -1276,6 +1397,29 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// "Difficulty": easy puts the die on 2 and the snow on 1, normal is the defaults.
+    fn preset(choices: &str, default: i64) -> String {
+        format!(r#"{{"id":"niveau","type":"choice","label":"Niveau","default":{default},"choices":[{choices}]}}"#)
+    }
+    const PRESETS: &str = r#"{"value":0,"label":"Douce","sets":{"de":2,"neige":1}},{"value":1,"label":"Normale","sets":{"de":3,"neige":1}},{"value":9,"label":"Perso"}"#;
+
+    #[test]
+    fn presets_follow_the_other_settings() {
+        let dir = scratch("presets");
+        let path = settings_mod(&dir, "p", &format!("[{},{SNOW},{DIE}]", preset(PRESETS, 1)));
+        install(&WPMOD, &path, &dir.join("mods")).unwrap();
+        let read = |saved: &str| {
+            let saved: Values = serde_json::from_str(&format!(r#"{{"p":{saved}}}"#)).unwrap();
+            installed(&WPMOD, &dir.join("mods"), &saved).pop().unwrap().values
+        };
+        assert_eq!(read("{}")["niveau"], 1);
+        assert_eq!(read(r#"{"de":2}"#)["niveau"], 0);
+        assert_eq!(read(r#"{"de":4}"#)["niveau"], 9);
+        // (a saved value of the preset itself is not what decides it)
+        assert_eq!(read(r#"{"niveau":0}"#)["niveau"], 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn refuses_settings_that_cannot_work() {
         let dir = scratch("bad-settings");
@@ -1292,6 +1436,11 @@ mod tests {
             (format!("[{}]", DIE.replace(r#""max":6"#, r#""max":300"#)), "octet"),
             (format!("[{DIE},{DIE}]"), "double"),
             (format!("[{}]", SNOW.replace(r#""label":{"fr":"Neige","en":"Snow"}"#, r#""label":{"fr":"Neige","en":""}"#)), "texte"),
+            (format!("[{},{SNOW},{DIE}]", preset(&PRESETS.replace(r#","label":"Perso""#, r#","label":"Perso","sets":{"de":4}"#), 1)), "personnalisé"),
+            (format!("[{},{SNOW},{DIE}]", preset(&PRESETS.replace(r#""de":2"#, r#""de":7"#), 1)), "« de » sur 7"),
+            (format!("[{},{SNOW},{DIE}]", preset(&PRESETS.replace(r#""de":2"#, r#""rien":2"#), 1)), "« rien »"),
+            (format!("[{},{SNOW},{DIE}]", preset(PRESETS, 0)), "par défaut n’est pas celle"),
+            (format!("[{},{DIE}]", preset(PRESETS, 1).replace(r#""default":1"#, r#""default":1,"memory":{"offset":"0x80001804","size":1}"#)), "ne choisit rien"),
         ];
         for (settings, expected) in cases {
             let why = install(&WPMOD, &settings_mod(&dir, "bad", &settings), &dir.join("mods")).err().unwrap_or_else(|| panic!("accepté : {settings}"));

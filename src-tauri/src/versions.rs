@@ -17,7 +17,7 @@ use tokio::sync::OnceCell;
 /// What a fresh install starts on.
 pub const FIRST: &str = "prstance.mode-hiver";
 
-const WPVER: Kind = Kind { manifest: "version.json", extension: "wpver", check: check_theme };
+pub const WPVER: Kind = Kind { manifest: "version.json", extension: "wpver", check: check_theme };
 /// The launcher's CSS variables (app.css) a theme may set.
 const COLORS: [&str; 19] = [
     "bg", "tint", "accent", "accent-soft", "accent-deep", "label", "grad-top", "grad-bottom", "text", "muted", "surface",
@@ -45,6 +45,22 @@ pub struct Theme {
     home: Vec<Decor>,
     #[serde(default)]
     library: Vec<Decor>,
+    /// Pictures of the game's modes on the home screen (modes.rs), or of its own modes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    modes: Vec<ModeArt>,
+    /// Only those: none of the game's.
+    #[serde(default, rename = "modesOnly")]
+    modes_only: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ModeArt {
+    /// One of the game's (modes.rs: "board-game-island"…), or a new one.
+    pub mode: String,
+    pub image: String,
+    /// Instead of the game's; a new mode needs one.
+    #[serde(default)]
+    pub name: Option<Text>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -139,12 +155,32 @@ fn check_theme(package: &Path, manifest: &Manifest) -> Result<(), String> {
         }
         check_image(package, &decor.image, MAX_IMAGE)?;
     }
+    for art in &theme.modes {
+        let unnamed = art.name.as_ref().is_none_or(Text::is_blank);
+        if art.mode.trim().is_empty() || (unnamed && (theme.modes_only || !crate::modes::is_known(&art.mode))) {
+            return Err(tr!("son thème montre un mode sans nom : « {mode} »", mode = art.mode));
+        }
+        check_image(package, &art.image, MAX_IMAGE)?;
+    }
     Ok(())
+}
+
+/// Whether its theme shows only its own modes on the home screen.
+pub fn only_its_modes(version: &Installed) -> bool {
+    version.manifest.theme.as_ref().is_some_and(|t| t.modes_only)
+}
+
+/// The pictures of modes of a version's theme, with `data:` URLs.
+pub fn mode_art(version: &Installed) -> Vec<ModeArt> {
+    let Some(theme) = &version.manifest.theme else { return Vec::new() };
+    theme.modes.iter().filter_map(|art| Some(ModeArt { image: data_url(&version.dir, &art.image)?, ..art.clone() })).collect()
 }
 
 /// The theme as the page uses it: `data:` URLs instead of paths inside the package.
 fn for_page(version: &Installed) -> Option<Theme> {
     let mut theme = version.manifest.theme.clone()?;
+    // The page gets them with the game's (modes_get).
+    theme.modes.clear();
     for decor in [&mut theme.hero, &mut theme.home, &mut theme.library] {
         decor.retain_mut(|d| {
             data_url(&version.dir, &d.image).map(|url| d.image = url).is_some()
@@ -410,6 +446,9 @@ mod tests {
             (r#""theme":{"colors":{},"hero":[{"image":"../../secret.svg","x":0,"y":0,"size":1}]},"#, "hors du paquet"),
             (r#""theme":{"colors":{},"home":[{"image":"theme/hero.svg","x":0,"y":0,"size":1,"motion":"spin; color: red"}]},"#, "mouvement"),
             (r#""theme":{"colors":{},"library":[{"image":"http://x/a.svg","x":0,"y":0,"size":1}]},"#, "introuvable"),
+            (r#""theme":{"colors":{},"modes":[{"mode":"mine","image":"theme/hero.svg"}]},"#, "sans nom"),
+            (r#""theme":{"colors":{},"modes":[{"mode":"bingo","image":"theme/absent.png"}]},"#, "introuvable"),
+            (r#""theme":{"colors":{},"modesOnly":true,"modes":[{"mode":"bingo","image":"theme/hero.svg"}]},"#, "sans nom"),
         ];
         for (theme, expected) in cases {
             package(&at, "1.0", theme);

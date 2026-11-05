@@ -8,14 +8,12 @@
   import { theme, activeVersion } from '../lib/versions.svelte.js';
   import { game } from '../lib/game.svelte.js';
   import Decor from '../components/Decor.svelte';
-  import { t, plural, local } from '../lib/i18n.svelte.js';
-
-  const spaces = [
-    { x: 14, y: 168, c: '#fc6c78' }, { x: 62, y: 190, c: '#fca20c' }, { x: 112, y: 176, c: '#72cc72' },
-    { x: 150, y: 138, c: '#3cb4e8' }, { x: 112, y: 104, c: '#fc6c78' }, { x: 76, y: 66, c: '#c864f8' },
-    { x: 112, y: 26, c: '#72cc72' }, { x: 166, y: 14, c: '#fca20c' }, { x: 216, y: 40, c: '#fc6c78' },
-    { x: 236, y: 92, c: '#3cb4e8' }, { x: 290, y: 104, c: '#72cc72' }, { x: 304, y: 156, c: '#c864f8' }
-  ];
+  import { t, plural, local, lang } from '../lib/i18n.svelte.js';
+  import { settings } from '../lib/settings.svelte.js';
+  import { myMii } from '../lib/miis.svelte.js';
+  import MiiHead from '../components/MiiHead.svelte';
+  import ModeShow from '../components/ModeShow.svelte';
+  import { loadModes } from '../lib/modes.svelte.js';
 
   let tools = $state(null);
   $effect(() => {
@@ -24,6 +22,12 @@
 
   const ready = $derived(!!dolphinOf(tools) && hasPlayer());
   const connected = $derived(wiimotes.slots.filter(Boolean).length);
+
+  // The modes' pictures and names depend on the language, the ISO and the version.
+  $effect(() => {
+    const version = activeVersion();
+    loadModes([lang(), settings.iso?.path, version?.id, version?.version].join('|'), lang());
+  });
 </script>
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
@@ -43,10 +47,10 @@
     <header data-tauri-drag-region style="height: 56px; display: flex; align-items: center; justify-content: space-between;">
       <span></span>
       <div style="display: flex; align-items: center; gap: 22px;">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span aria-hidden="true" style="width: 28px; height: 28px; border-radius: 9px; background: var(--accent); color: #ffffff; font-size: 17px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 2px 0 rgba(255,255,255,0.4);">P</span>
-          <span style="font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.01em;">Party<span style="color: var(--accent);">Launcher</span></span>
-        </div>
+        <a href="#/Miis" title={t('Mes Mii')} style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px 0 4px; border-radius: 999px; background: #ffffff; text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
+          <span aria-hidden="true" style="width: 34px; height: 34px; border-radius: 999px; background: var(--surface-soft); display: flex; align-items: center; justify-content: center; overflow: hidden;"><MiiHead mii={myMii()} size={32} /></span>
+          <span style="font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.01em;">{settings.player?.name ?? 'Party'}<span style="color: var(--accent);">{settings.player ? '' : 'Launcher'}</span></span>
+        </a>
         <div style="display: flex; gap: 4px; margin-right: -24px;">
           <button type="button" aria-label={t('Réduire')} onclick={minimize} style="width: 40px; height: 32px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg></button>
           <button type="button" aria-label={t('Agrandir')} onclick={toggleMaximize} style="width: 40px; height: 32px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer;"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><rect x="2" y="2" width="10" height="10" rx="2.5" stroke="currentColor" stroke-width="2" fill="none"></rect></svg></button>
@@ -59,7 +63,7 @@
       <div style="position: relative; z-index: 2; width: 600px; padding-top: 18px; display: flex; flex-direction: column; align-items: flex-start;">
         <span style="display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border-radius: 999px; background: #ffffff; box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: var(--label);">
           <span class:motion-pulse={ready} style="width: 18px; height: 18px; border-radius: 999px; background: {ready ? '#25a720' : '#fca20c'}; display: inline-block; box-shadow: inset 0 2px 0 rgba(255,255,255,0.45);"></span>
-          {!inTauri ? t('Aperçu dans le navigateur') : !tools ? t('Vérification…') : game.phase === 'running' ? t('Partie en cours') : ready ? t('Prêt à jouer') : dolphinOf(tools) ? t('Connecte une Wiimote') : t('Dolphin absent de ce build')}
+          {!inTauri ? t('Aperçu dans le navigateur') : !tools ? t('Vérification…') : game.phase === 'running' ? (game.title === 'miis' ? t('Chaîne Mii ouverte') : t('Partie en cours')) : ready ? t('Prêt à jouer') : dolphinOf(tools) ? t('Connecte une Wiimote') : t('Dolphin absent de ce build')}
         </span>
         <h1 style="margin: 14px 0 0; font-size: 108px; line-height: 108px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent); -webkit-text-stroke: 14px #ffffff; paint-order: stroke fill; text-shadow: 0 8px 0 rgba(var(--shadow),0.10);">Wii Party</h1>
         <p style="margin: 8px 0 0; max-width: 500px; font-size: 17px; line-height: 27px; font-weight: 500; letter-spacing: 0.02em;">{local(theme.tagline) ?? t('Connecte tes Wiimotes, appuie sur Jouer, puis indique ton ISO de Wii Party.')}</p>
@@ -85,33 +89,20 @@
         </div>
       </div>
 
-      {#if theme.hero.length}
-        <div aria-hidden="true" style="position: absolute; right: -30px; top: -32px; width: 550px; height: 460px; pointer-events: none;">
+      <div aria-hidden="true" style="position: absolute; right: -30px; top: -32px; width: 550px; height: 460px; pointer-events: none;">
+        <ModeShow />
+        {#if theme.hero.length}
           <Decor items={theme.hero} />
-        </div>
-      {:else}
-        <div aria-hidden="true" style="position: absolute; right: 10px; top: 8px; width: 470px; height: 380px;">
-          <div class="motion-float" style="position: absolute; left: 60px; top: 40px; width: 390px; height: 260px; border-radius: 40px; background: #ffffff; transform: rotate(-7deg); box-shadow: 0 8px 0 rgba(var(--shadow),0.10), 0 24px 50px rgba(var(--shadow),0.16);">
-            <div style="position: absolute; inset: 18px; border-radius: 26px; background: #f2e8d4;">
-              {#each spaces as s}
-                <span style="position: absolute; left: {s.x}px; top: {s.y}px; width: 40px; height: 40px; border-radius: 999px; background: {s.c}; box-shadow: inset 0 4px 0 rgba(255,255,255,0.45), 0 4px 0 rgba(60,30,40,0.18);"></span>
-              {/each}
-              <span style="position: absolute; left: 132px; top: 66px; width: 48px; height: 48px; border-radius: 999px; background: #1283cb; border: 4px solid #ffffff; box-sizing: border-box; color: #ffffff; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 rgba(0,0,0,0.18);">1</span>
-              <span style="position: absolute; left: 258px; top: 22px; width: 48px; height: 48px; border-radius: 999px; background: #b33f26; border: 4px solid #ffffff; box-sizing: border-box; color: #ffffff; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 rgba(0,0,0,0.18);">2</span>
-              <span style="position: absolute; left: 64px; top: 140px; width: 48px; height: 48px; border-radius: 999px; background: #1f7d1b; border: 4px solid #ffffff; box-sizing: border-box; color: #ffffff; font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 rgba(0,0,0,0.18);">3</span>
-              <span style="position: absolute; left: 228px; top: 150px; width: 48px; height: 48px; border-radius: 999px; background: #d9b527; border: 4px solid #ffffff; box-sizing: border-box; color: var(--text); font-size: 16px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 5px 0 rgba(0,0,0,0.18);">4</span>
-            </div>
-          </div>
-          <div class="motion-wobble" style="position: absolute; left: 0; top: 232px; width: 124px; height: 124px; border-radius: 30px; background: #ffffff; transform: rotate(14deg); box-shadow: inset 0 -8px 0 #f1dde5, 0 8px 0 rgba(var(--shadow),0.10), 0 18px 34px rgba(var(--shadow),0.18);">
+        {:else}
+          <div class="motion-wobble" style="position: absolute; left: 40px; top: 290px; width: 124px; height: 124px; border-radius: 30px; background: #ffffff; transform: rotate(14deg); box-shadow: inset 0 -8px 0 #f1dde5, 0 8px 0 rgba(var(--shadow),0.10), 0 18px 34px rgba(var(--shadow),0.18);">
             <span style="position: absolute; left: 22px; top: 22px; width: 20px; height: 20px; border-radius: 999px; background: var(--accent);"></span>
             <span style="position: absolute; right: 22px; top: 22px; width: 20px; height: 20px; border-radius: 999px; background: var(--accent);"></span>
             <span style="position: absolute; left: 52px; top: 48px; width: 20px; height: 20px; border-radius: 999px; background: var(--accent);"></span>
             <span style="position: absolute; left: 22px; bottom: 30px; width: 20px; height: 20px; border-radius: 999px; background: var(--accent);"></span>
             <span style="position: absolute; right: 22px; bottom: 30px; width: 20px; height: 20px; border-radius: 999px; background: var(--accent);"></span>
           </div>
-          <div class="motion-bob" style="position: absolute; right: 0; top: 0; width: 66px; height: 66px; border-radius: 999px; background: #fada20; box-shadow: inset 0 5px 0 rgba(255,255,255,0.5), 0 5px 0 #b59a00;"></div>
-        </div>
-      {/if}
+        {/if}
+      </div>
     </section>
 
     <section class="cards" aria-label={t('Raccourcis')} style="margin-top: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; height: 222px;">
