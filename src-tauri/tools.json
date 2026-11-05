@@ -20,24 +20,5 @@
       "bin": "Dolphin.app/Contents/MacOS/Dolphin",
       "tool": "dolphin-tool"
     }
-  },
-  "wit": {
-    "name": "Wiimms ISO Tools",
-    "version": "3.05a",
-    "linux": {
-      "url": "https://wit.wiimm.de/download/wit-v3.05a-r8638-x86_64.tar.gz",
-      "sha256": "df95a14f1b4b2bd95d3111b70c6304e91d4ed3e4c7f72b1ad5306c3616d8933f",
-      "bin": "wit-v3.05a-r8638-x86_64/bin/wit"
-    },
-    "windows": {
-      "url": "https://wit.wiimm.de/download/wit-v3.05a-r8638-cygwin64.zip",
-      "sha256": "049670558970f0cea2796d68e0ba1e48491474b5708bf12a95ab8a185f4e59c1",
-      "bin": "wit-v3.05a-r8638-cygwin64/bin/wit.exe"
-    },
-    "macos": {
-      "url": "https://wit.wiimm.de/download/wit-v3.05a-r8638-mac.tar.gz",
-      "sha256": "670fd1920eb0390ecdc2553942df71f0ced43c63c8e83588a23705b569d25213",
-      "bin": "wit-v3.05a-r8638-mac/bin/wit"
-    }
   }
 }

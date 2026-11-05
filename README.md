@@ -36,18 +36,17 @@ sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file openssl appmenu
 Windows : WebView2 (déjà présent sur Windows 10/11) et les outils de build C++ de Visual Studio.
 macOS : les outils Xcode en ligne de commande (`xcode-select --install`).
 Chaque OS se compile sur lui-même (ou via la CI) : pas de compilation croisée.
-`.github/workflows/launcher.yml` lance les tests et fabrique les paquets sur les 3 OS, sans Dolphin ni version
-tant que le launcher n'a pas de dépôt ni la release du fork.
+`.github/workflows/launcher.yml` (à la main, onglet Actions) lance les tests et fabrique des paquets
+sans Dolphin sur les 3 OS ; les vrais viennent de `release.yml` (voir « Mises à jour du launcher »).
 
 ## Programmes intégrés
 
-Dolphin et wit sont livrés **dans** le launcher : rien à installer au premier lancement, ça marche
+Dolphin est livré **dans** le launcher : rien à installer au premier lancement, ça marche
 hors ligne. La liste vient de `src-tauri/tools.json` (un bloc par OS) :
 
 | Programme | Rôle | Linux | Windows | macOS |
 | --- | --- | --- | --- | --- |
 | Dolphin | lance le jeu, Wiimotes | `.tar.gz` portable (x86_64) | `.zip` (x64) | `.tar.gz` de `Dolphin.app` (arm64) |
-| wit 3.05a | reconstruire l'ISO | `.tar.gz` (x86_64) | `.zip` Cygwin | `.tar.gz` |
 
 Dolphin vient de notre fork [prstance/wp-dolphin](https://github.com/prstance/wp-dolphin)
 (branche `wp/main`, voir `Tools/wp/README.md` là-bas) : même version sur les 3 OS, compilée par

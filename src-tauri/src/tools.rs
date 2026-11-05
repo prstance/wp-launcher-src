@@ -1,4 +1,4 @@
-//! Programs shipped inside the launcher (Dolphin, wit). scripts/fetch-tools.mjs
+//! Programs shipped inside the launcher (Dolphin). scripts/fetch-tools.mjs
 //! puts them in src-tauri/tools/<id>/ at build time, with an installed.json
 //! marker; Tauri bundles that folder as a resource.
 
