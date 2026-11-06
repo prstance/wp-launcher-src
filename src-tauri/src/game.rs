@@ -1,5 +1,6 @@
 //! Picking the disc image and running the game in the shipped Dolphin.
 
+use crate::discord;
 use crate::i18n::tr;
 use crate::mii;
 use crate::mods;
@@ -16,7 +17,8 @@ use tauri::async_runtime::spawn;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{ChildStdout, Command};
 use tokio::sync::oneshot;
 
 const STATE_EVENT: &str = "game://state";
@@ -25,6 +27,8 @@ const DISC_FORMATS: [&str; 6] = ["iso", "wbfs", "rvz", "gcz", "wia", "ciso"];
 const RECENT_MAX: usize = 5;
 /// Tells our Dolphin build where to ask for the remotes (IOBridge.h in the fork).
 const WIIMOTE_BRIDGE: &str = "WP_WIIMOTE_BRIDGE";
+/// Asks our Dolphin build to print where the game is (WPGameState.h in the fork).
+const GAME_STATE: &str = "WP_GAME_STATE";
 
 #[derive(Serialize, Clone)]
 pub struct GameState {
@@ -239,6 +243,11 @@ async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool) {
             return;
         }
     }
+    // The mods' code and texts, linked into the game's files.
+    if let Err(e) = mods::link_code(&app, &disc, &packages).await {
+        set_state(&app, "error", Some(e));
+        return;
+    }
     if let Err(e) = mii::write_nand(&app) {
         eprintln!("Mii: {e}");
     }
@@ -264,8 +273,9 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
         cmd.env(WIIMOTE_BRIDGE, bridge);
     }
     let spawned = cmd
+        .env(GAME_STATE, "1")
         .args(dolphin_args(settings, boot, &user))
-        .stdout(Stdio::from(out))
+        .stdout(Stdio::piped())
         .stderr(Stdio::from(err))
         .kill_on_drop(true)
         .spawn();
@@ -276,6 +286,7 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
             return Err(tr!("Impossible de démarrer Dolphin : {e}", e = e));
         }
     };
+    let follower = child.stdout.take().map(|stdout| spawn(follow(app.clone(), stdout, out)));
 
     let window = app.get_webview_window("main");
     if settings.minimize_in_game {
@@ -286,6 +297,8 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     let (tx, rx) = oneshot::channel();
     *app.state::<Game>().stop.lock().unwrap() = Some(tx);
     set_state(app, "running", None);
+    let title = app.state::<Game>().state.lock().unwrap().title;
+    discord::playing(app, title);
 
     let status = tokio::select! {
         status = child.wait() => status.map(Some),
@@ -293,6 +306,11 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     };
 
     *app.state::<Game>().stop.lock().unwrap() = None;
+    discord::stopped(app);
+    // Its last lines, in the log before it's read.
+    if let Some(follower) = follower {
+        let _ = tokio::time::timeout(Duration::from_secs(2), follower).await;
+    }
     wiimotes.take_back();
     if let Some(w) = &window {
         let _ = w.unminimize();
@@ -307,6 +325,19 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
         }
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Dolphin's output, into its log; our build's lines on where the game is also go
+/// to Discord. Not all of it is UTF-8, and all of it must be read, or Dolphin waits.
+async fn follow(app: AppHandle, stdout: ChildStdout, mut log: std::fs::File) {
+    use std::io::Write;
+    let mut stdout = BufReader::new(stdout);
+    let mut line = Vec::new();
+    while stdout.read_until(b'\n', &mut line).await.is_ok_and(|n| n > 0) {
+        let _ = log.write_all(&line);
+        discord::report(&app, String::from_utf8_lossy(&line).trim_end());
+        line.clear();
     }
 }
 

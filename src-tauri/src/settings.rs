@@ -46,6 +46,8 @@ pub struct Settings {
     pub show_fps: bool,
     pub volume: u32,
     pub minimize_in_game: bool,
+    /// What's being played, on the player's Discord profile (discord.rs).
+    pub discord_presence: bool,
     /// The launcher's language: "fr", "en", "es", or "auto" for the system's.
     pub language: String,
     /// Mods the game starts with, in load order.
@@ -75,6 +77,7 @@ impl Default for Settings {
             show_fps: false,
             volume: 100,
             minimize_in_game: true,
+            discord_presence: true,
             language: "auto".to_string(),
             enabled_mods: Vec::new(),
             package_settings: Default::default(),
@@ -150,5 +153,8 @@ pub fn settings_set(app: AppHandle, store: State<'_, Store>, patch: Value) -> Re
     }
     let next: Settings = serde_json::from_value(merged).map_err(|e| e.to_string())?;
     let saved = store.update(&app, |s| *s = next)?;
+    if patch.get("discordPresence").is_some() {
+        crate::discord::refresh(&app);
+    }
     Ok(for_ui(&app, saved))
 }

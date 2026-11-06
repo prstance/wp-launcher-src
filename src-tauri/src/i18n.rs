@@ -10,6 +10,11 @@ use std::sync::RwLock;
 
 static LANG: RwLock<&str> = RwLock::new("fr");
 
+/// The launcher's language: "fr", "en" or "es".
+pub fn lang() -> &'static str {
+    *LANG.read().unwrap()
+}
+
 /// (French, English, Spanish), one per line.
 const TEXTS: &[(&str, &str, &str)] = &[
     ("Dolphin est absent de ce build du launcher.", "Dolphin is missing from this build of the launcher.", "Dolphin no está incluido en esta versión del launcher."),
@@ -52,8 +57,6 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("« {name} » ne fonctionne pas sur ton ISO ({game}). Il demande : {games}.", "“{name}” doesn't work with your ISO ({game}). It needs: {games}.", "«{name}» no funciona con tu ISO ({game}). Necesita: {games}."),
     ("« {name} » a besoin du mod « {id} », qui n’est pas activé.", "“{name}” needs the mod “{id}”, which isn't turned on.", "«{name}» necesita el mod «{id}», que no está activado."),
     ("« {name} » demande « {other} » en version {range} (installée : {installed}).", "“{name}” needs “{other}” version {range} (installed: {installed}).", "«{name}» necesita «{other}» en la versión {range} (instalada: {installed})."),
-    ("« {a} » indique être incompatible avec « {b} ».", "“{a}” says it doesn't work with “{b}”.", "«{a}» indica que es incompatible con «{b}»."),
-    ("« {a} » et « {b} » modifient le même code du jeu ({at}).", "“{a}” and “{b}” change the same game code ({at}).", "«{a}» y «{b}» modifican el mismo código del juego ({at})."),
     (" et {n} autre(s)", " and {n} more", " y {n} más"),
     ("« {a} » et « {b} » remplacent le même fichier ({file}) : « {b} » passe en priorité, l’autre mod peut mal fonctionner.", "“{a}” and “{b}” replace the same file ({file}): “{b}” wins, so the other mod may not work properly.", "«{a}» y «{b}» sustituyen el mismo archivo ({file}): «{b}» tiene prioridad y el otro mod puede fallar."),
     ("Tout ce que modifie « {name} » n’a pas pu être analysé : compatibilité inconnue.", "Not everything “{name}” changes could be checked: compatibility unknown.", "No se ha podido analizar todo lo que modifica «{name}»: compatibilidad desconocida."),
@@ -130,6 +133,26 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("La mise à jour a échoué : {e}", "The update failed: {e}", "La actualización ha fallado: {e}"),
     ("Ce mod n’est plus installé.", "This mod isn’t installed anymore.", "Este mod ya no está instalado."),
     ("La valeur {value} n’est pas permise pour « {setting} ».", "The value {value} isn’t allowed for “{setting}”.", "El valor {value} no está permitido para «{setting}»."),
+    ("Dans la Chaîne Mii", "In the Mii Channel", "En el Canal Mii"),
+    ("Crée un Mii", "Making a Mii", "Creando un Mii"),
+    ("sans mod", "no mods", "sin mods"),
+    ("1 mod", "1 mod", "1 mod"),
+    ("{n} mods", "{n} mods", "{n} mods"),
+    ("Jeu d’origine", "Original game", "Juego original"),
+    ("Dans le launcher", "In the launcher", "En el launcher"),
+    ("Menu principal", "Main menu", "Menú principal"),
+    ("Dans un mini-jeu", "In a minigame", "En un minijuego"),
+    ("Mini-jeu : {name}", "Minigame: {name}", "Minijuego: {name}"),
+    ("Mini-jeu", "Minigame", "Minijuego"),
+    ("son mini-jeu « {id} » n’a pas un numéro valide", "its minigame “{id}” doesn’t have a valid number", "su minijuego «{id}» no tiene un número válido"),
+    ("sa variable n’est pas dans le code du paquet", "its variable isn't in the package's code", "su variable no está en el código del paquete"),
+    ("un de ses patchs désigne un fichier hors du paquet", "one of its patches points to a file outside the package", "uno de sus parches señala un archivo fuera del paquete"),
+    ("{file} est introuvable dans le paquet", "{file} can't be found in the package", "{file} no está en el paquete"),
+    ("« {b} » remplace en entier un fichier que « {a} » modifie ({file}) : « {b} » doit passer au système de mods compatibles.", "“{b}” replaces a whole file that “{a}” changes ({file}): “{b}” must move to the compatible mods system.", "«{b}» sustituye por completo un archivo que «{a}» modifica ({file}): «{b}» debe pasar al sistema de mods compatibles."),
+    ("« {a} » et « {b} » changent le même texte du jeu ({key}) : celui de « {b} » s’affiche.", "“{a}” and “{b}” change the same game text ({key}): the one from “{b}” is shown.", "«{a}» y «{b}» cambian el mismo texto del juego ({key}): se muestra el de «{b}»."),
+    ("Ce build du launcher n’a pas le cœur des mods : mets-le à jour.", "This build of the launcher doesn't have the mods' core: update it.", "Esta versión del launcher no tiene el núcleo de los mods: actualízala."),
+    ("« {a} » et « {b} » sont incompatibles entre eux.", "“{a}” and “{b}” aren't compatible with each other.", "«{a}» y «{b}» son incompatibles entre sí."),
+    ("Le code des mods ne s’assemble pas{who} : {why}", "The mods' code doesn't fit together{who}: {why}", "El código de los mods no encaja{who}: {why}"),
 ];
 
 /// The French `fr` in the launcher's language.

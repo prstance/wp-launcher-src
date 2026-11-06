@@ -216,12 +216,22 @@ Un `.wpmod` est un zip avec un `mod.json` à la racine :
 - `"launcher": ">=0.2"` : les versions du launcher qu'il lui faut. Un launcher plus ancien le refuse en
   demandant d'être mis à jour (Paramètres › À propos), avant même de regarder son format ou ses patchs :
   c'est ce qui permet d'ajouter des types de patch sans casser les anciens launchers.
-- Types de patch : `riivolution` (il en faut au moins un) et `delta` (ci-dessous). Un mod Gecko est refusé.
+- Types de patch : `riivolution`, `delta` (ci-dessous), `files` et `code` (voir « Mods compatibles »). Un mod Gecko est refusé.
+- `minigame_names` (facultatif) : le nom des mini-jeux qu'il ajoute ou remplace, par numéro, pour la présence Discord :
+  `{ "444": { "fr": "Boule de neige", "en": "Snowball Toss" } }`. À ne pas confondre avec `minigames`, le registre des mini-jeux.
 - `options` dit quelles options du XML activer (`choice` compte à partir de 1). La racine Riivolution
   est celle du paquet.
 - `scripts/make-wpmod.py` fabrique un `.wpmod` à partir d'un paquet Riivolution.
 - `scripts/riivolution-from-disc.py` fabrique ce paquet à partir d'une copie modifiée du disque extrait.
   Un `main.dol` modifié y entre en `<file disc="main.dol">` : Dolphin le comprend, pas une vraie Wii.
+
+### Mods compatibles
+
+Le launcher est aussi un éditeur de liens (`src-tauri/src/link/`, conception dans wp-core `docs/modding.md`) : un patch
+`code` livre des objets compilés que le launcher relie au cœur, au lancement, dans `<données>/mods/.linked/`. Plusieurs
+mods peuvent ainsi changer le même module. Le cœur (`src-tauri/core/`) est l'export de wp-core,
+`build/SUPP01/wpcore/` après `configure.py --core` et `ninja`, sans `disc_mr001.rel` ; il est dans le dépôt, car la CI de
+release l'embarque. Un paquet ne se lie qu'à un cœur qui a ses hooks : le changer demande de refaire les paquets.
 
 ### Deltas : pas de fichier du jeu dans le paquet
 
@@ -378,9 +388,12 @@ Les `.wpver` de `src-tauri/versions/` sont fournis avec le launcher : installés
 remplacés seulement si le launcher en apporte une version plus récente. Ils ne peuvent pas être retirés.
 Une nouvelle installation démarre sur `prstance.mode-hiver`.
 
-`src-tauri/versions/*.wpver` est versionné (la CI de release l'embarque) : fait avec `--disc`, il ne
-contient plus aucun fichier du jeu, seulement des deltas et les fichiers propres au mod. Pour refaire
-Mode Hiver depuis wp-winter (branche `mod/winter`) :
+Une version a les mêmes patchs qu'un mod, `code` compris : elle se lie aux mods activés et reste compatible avec eux.
+Mode Hiver (`prstance.mode-hiver` 2026.12.0) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
+en fait un `.wpver` (`"package": "version"` dans son `wpmod.json`), à copier dans `src-tauri/versions/`. Un `.wpver`
+fourni doit être versionné (la CI de release l'embarque).
+
+Ancienne recette, sans le système de mods compatibles, depuis wp-winter (branche `mod/winter`) :
 
 1. Dans wp-winter, `WINTER_DEBUG` à 0 (`include/wp/mr001/winter.h`), puis `ninja` (tout, pas seulement
    les RELs modifiés : le mode ajoute du code à `main.dol`, donc chaque REL doit être relié au nouveau).
@@ -423,8 +436,8 @@ seule l'AppImage sait se mettre à jour (un `.deb` / `.rpm` passe par le gestion
   `v<version>` sur le dépôt (privé) du code. `.github/workflows/release.yml` construit les trois systèmes
   et publie la release dans prstance/wp-launcher avec `latest.json`. Secrets du dépôt du code :
   `RELEASES_TOKEN` (un jeton qui peut écrire les releases de prstance/wp-launcher) et
-  `TAURI_SIGNING_PRIVATE_KEY` (le contenu de la clé privée). Les `.wpver` livrés doivent être dans le
-  dépôt du code : faits avec `--disc`, ils ne contiennent plus de fichier du jeu.
+  `TAURI_SIGNING_PRIVATE_KEY` (le contenu de la clé privée). Le cœur des mods et les `.wpver` livrés doivent
+  être dans le dépôt du code.
 
 ## Langues
 

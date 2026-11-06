@@ -3,6 +3,7 @@
 //! Versions (versions.rs) are the same packages under another name.
 
 use crate::game::{data_dir, is_playing};
+use crate::link;
 use crate::i18n::{tr, Text};
 use crate::settings::{Disc, Settings, Store};
 use crate::versions::{self, Theme};
@@ -24,6 +25,9 @@ const MAX_ICON: u64 = 512 << 10;
 /// Where the memory settings go in the Riivolution XML the launcher writes.
 const SETTINGS_SECTION: &str = "PartyLauncher";
 const SETTINGS_OPTION: &str = "Settings";
+const FILES_OPTION: &str = "Files";
+/// link/mod.rs link_game's XML.
+const CODE_OPTION: &str = "Code";
 
 /// Saved values of the packages' settings: package id -> setting id -> value.
 pub type Values = BTreeMap<String, BTreeMap<String, i64>>;
@@ -58,12 +62,27 @@ pub struct Manifest {
     /// What the player can choose, on the package's page.
     #[serde(default)]
     settings: Vec<Setting>,
+    /// The names of the minigames it adds or replaces, by id ("444"): minigames.rs.
+    #[serde(default)]
+    pub minigame_names: BTreeMap<String, Text>,
     /// Mod id -> versions: "*" or ">=1.2".
     #[serde(default)]
     requires: BTreeMap<String, String>,
     #[serde(default)]
     conflicts: BTreeMap<String, String>,
+    #[serde(default)]
     patches: Vec<Patch>,
+    /// Its texts, applied to the disc's message files with the other mods' (link/xmsg.rs): language
+    /// folder ("fr_EU") -> message key -> text. A key the game doesn't have is added.
+    #[serde(default)]
+    pub messages: BTreeMap<String, BTreeMap<String, String>>,
+    /// Its texts when another mod is also active: that mod's id -> language -> key -> text. They win
+    /// over the other mods' for those keys ("the volcano" of a mod is "the crevasse" with this one).
+    #[serde(default)]
+    pub messages_with: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
+    /// The minigames it adds (link/minigames.rs): main.dol's minigame table, the rules screens, Free Play.
+    #[serde(default)]
+    pub minigames: Vec<link::minigames::Spec>,
     /// Versions only.
     #[serde(default)]
     pub theme: Option<Theme>,
@@ -71,6 +90,8 @@ pub struct Manifest {
 
 /// "riivolution": an XML of the package and the options it turns on. "delta": the
 /// package's files to make from the player's disc before a launch (rebuild.rs).
+/// "files": files of the package that replace (or add) disc files. "code": the mod's
+/// code, linked into the game with the other mods' at launch (link/, wp-core docs/modding.md).
 #[derive(Deserialize, Clone)]
 pub struct Patch {
     #[serde(rename = "type")]
@@ -81,14 +102,19 @@ pub struct Patch {
     options: Vec<Choice>,
     #[serde(default)]
     pub files: Vec<DeltaFile>,
+    /// "code": module ("main", "mr001"…) -> what the mod puts in it.
+    #[serde(default)]
+    modules: BTreeMap<String, link::CodeModule>,
 }
 
 /// A file of the package (`file`, which its Riivolution XML names) made from the
-/// disc's `disc` ("/rel/mr001.rel.lz", or "main.dol") by `delta` (delta.rs).
+/// disc's `disc` ("/rel/mr001.rel.lz", or "main.dol") by `delta` (delta.rs). In a
+/// "files" patch, no delta: `file` is the disc's `disc`.
 #[derive(Deserialize, Clone)]
 pub struct DeltaFile {
     pub disc: String,
     pub file: String,
+    #[serde(default)]
     pub delta: String,
 }
 
@@ -137,6 +163,20 @@ struct Setting {
     riivolution: Option<Binding>,
     #[serde(default)]
     memory: Option<Slot>,
+    /// Or written into a variable of the package's code (a "code" patch).
+    #[serde(default)]
+    symbol: Option<SymbolSlot>,
+}
+
+/// `size` bytes at `offset` in the variable `name` of the mod's code in `module`.
+#[derive(Deserialize, Clone)]
+struct SymbolSlot {
+    module: String,
+    name: String,
+    #[serde(default = "four")]
+    size: u32,
+    #[serde(default)]
+    offset: u32,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -175,18 +215,27 @@ fn four() -> u32 {
     4
 }
 
+/// `value` fits in `size` bytes (signed or not).
+fn holds(size: u32, value: i64) -> bool {
+    let bits = size * 8;
+    (-(1i64 << (bits - 1))..1i64 << bits).contains(&value)
+}
+
+fn bytes(size: u32, value: i64) -> Vec<u8> {
+    value.to_be_bytes()[(8 - size as usize)..].to_vec()
+}
+
 impl Slot {
     fn address(&self) -> Option<u32> {
         u32::from_str_radix(self.offset.trim_start_matches("0x"), 16).ok()
     }
 
     fn holds(&self, value: i64) -> bool {
-        let bits = self.size * 8;
-        (-(1i64 << (bits - 1))..1i64 << bits).contains(&value)
+        holds(self.size, value)
     }
 
     fn bytes(&self, value: i64) -> Vec<u8> {
-        value.to_be_bytes()[(8 - self.size as usize)..].to_vec()
+        bytes(self.size, value)
     }
 }
 
@@ -258,6 +307,15 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
     }
     match (&setting.riivolution, &setting.memory) {
         _ if setting.is_preset() => check_preset(m, setting).or_else(fail)?,
+        (None, None) if setting.symbol.is_some() => {
+            let slot = setting.symbol.as_ref().unwrap();
+            if !m.patches.iter().any(|p| p.kind == "code" && p.modules.contains_key(&slot.module)) || slot.name.is_empty() || ![1, 2, 4].contains(&slot.size) {
+                return fail(tr!("sa variable n’est pas dans le code du paquet"));
+            }
+            if !setting.values().iter().all(|v| holds(slot.size, *v)) {
+                return fail(tr!("ses valeurs ne tiennent pas en {size} octet(s)", size = slot.size));
+            }
+        }
         (Some(binding), None) if setting.kind != "number" => {
             let Some(patch) = m.patches.iter().find(|p| p.xml == binding.xml) else {
                 return fail(tr!("{xml} n’est pas un patch du paquet", xml = binding.xml));
@@ -292,7 +350,7 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
 }
 
 fn check_preset(m: &Manifest, preset: &Setting) -> Result<(), String> {
-    if preset.riivolution.is_some() || preset.memory.is_some() {
+    if preset.riivolution.is_some() || preset.memory.is_some() || preset.symbol.is_some() {
         return Err(tr!("un préréglage ne choisit rien lui-même : ni option Riivolution, ni emplacement en mémoire"));
     }
     if preset.choices.iter().filter(|c| c.sets.is_empty()).count() != 1 {
@@ -320,6 +378,8 @@ pub struct Footprint {
     partial: bool,
     /// The package's file that replaces a disc file, by lowercase disc path.
     sources: BTreeMap<String, PathBuf>,
+    /// The disc files its code and texts change, which the launcher makes with the other mods' (link/).
+    linked: Vec<String>,
 }
 
 impl Footprint {
@@ -441,14 +501,28 @@ fn validate(m: &Manifest) -> Result<(), String> {
     if let Some(range) = m.requires.values().chain(m.conflicts.values()).find(|r| !range_is_valid(r)) {
         return Err(tr!("la plage de versions « {range} » n’est pas valide", range = range));
     }
-    if m.patches.is_empty() {
-        return Err(tr!("il ne contient aucun patch"));
+    if let Some(id) = m.minigame_names.keys().find(|id| id.parse::<i32>().is_err()) {
+        return Err(tr!("son mini-jeu « {id} » n’a pas un numéro valide", id = id));
     }
-    if let Some(patch) = m.patches.iter().find(|p| p.kind != "riivolution" && p.kind != "delta") {
+    if let Some(patch) = m.patches.iter().find(|p| !["riivolution", "delta", "files", "code"].contains(&p.kind.as_str())) {
         return Err(tr!("ce launcher ne sait pas encore charger les patchs « {kind} »", kind = patch.kind));
     }
-    if !m.patches.iter().any(|p| p.kind == "riivolution") || m.patches.iter().any(|p| p.kind == "delta" && p.files.is_empty()) {
+    let changes = m.patches.iter().any(|p| p.kind != "delta") || !m.messages.is_empty() || !m.minigames.is_empty();
+    if !changes || m.patches.iter().any(|p| (p.kind == "delta" || p.kind == "files") && p.files.is_empty()) {
         return Err(tr!("il ne contient aucun patch"));
+    }
+    for patch in &m.patches {
+        let objects = patch.modules.values().flat_map(|c| &c.objects);
+        let files = patch.files.iter().filter(|_| patch.kind == "files");
+        if objects.chain(files.map(|f| &f.file)).any(|f| !is_inside(f)) {
+            return Err(tr!("un de ses patchs désigne un fichier hors du paquet"));
+        }
+        if patch.kind == "files" && patch.files.iter().any(|f| !f.disc.starts_with('/')) {
+            return Err(tr!("un de ses patchs désigne un fichier hors du paquet"));
+        }
+        if patch.kind == "code" && patch.modules.is_empty() {
+            return Err(tr!("il ne contient aucun patch"));
+        }
     }
     for setting in &m.settings {
         check_setting(m, setting)?;
@@ -633,6 +707,22 @@ fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String,
             footprint.memory.push((at, slot.bytes(values.get(&setting.id).copied().unwrap_or(setting.default))));
         }
     }
+    for file in manifest.patches.iter().filter(|p| p.kind == "files").flat_map(|p| &p.files) {
+        footprint.files.push(disc_path(&file.disc));
+        footprint.sources.insert(disc_path(&file.disc), package.join(&file.file));
+    }
+    for patch in manifest.patches.iter().filter(|p| p.kind == "code") {
+        // (main.dol's code goes in memory: the linker tells the clashes)
+        footprint.linked.extend(patch.modules.keys().filter(|m| *m != "main").map(|m| disc_path(&format!("/rel/{m}.rel.lz"))));
+    }
+    footprint.linked.extend(manifest.messages.keys().map(|l| disc_path(&link::messages_file(l))));
+    footprint.linked.extend(manifest.messages_with.values().flat_map(|l| l.keys()).map(|l| disc_path(&link::messages_file(l))));
+    if !manifest.minigames.is_empty() {
+        // the core's modules that list the minigames (wp-core wp/mod/minigames.h)
+        footprint.linked.extend(["/rel/inst.rel.lz", "/rel/menu.rel.lz"].map(disc_path));
+    }
+    footprint.linked.sort();
+    footprint.linked.dedup();
     footprint.files.sort();
     footprint.files.dedup();
     Ok(footprint)
@@ -668,9 +758,20 @@ fn check_deltas(package: &Path, manifest: &Manifest) -> Result<(), String> {
     Ok(())
 }
 
+/// The files of its "files" and "code" patches are in the package.
+fn check_files(package: &Path, manifest: &Manifest) -> Result<(), String> {
+    let files = manifest.patches.iter().filter(|p| p.kind == "files").flat_map(|p| p.files.iter().map(|f| &f.file));
+    let objects = manifest.patches.iter().flat_map(|p| p.modules.values()).flat_map(|c| &c.objects);
+    match files.chain(objects).find(|f| !package.join(f).is_file()) {
+        Some(missing) => Err(tr!("{file} est introuvable dans le paquet", file = missing)),
+        None => Ok(()),
+    }
+}
+
 fn read_contents(kind: &Kind, package: &Path, manifest: &Manifest, values: &BTreeMap<String, i64>) -> Result<Footprint, String> {
     (kind.check)(package, manifest)?;
     check_deltas(package, manifest)?;
+    check_files(package, manifest)?;
     if let Some(icon) = &manifest.icon {
         check_image(package, icon, MAX_ICON)?;
     }
@@ -782,6 +883,10 @@ fn memory_clash(a: &Footprint, b: &Footprint) -> Option<u32> {
     None
 }
 
+fn incompatible(a: &Text, b: &Text) -> String {
+    tr!("« {a} » et « {b} » sont incompatibles entre eux.", a = a, b = b)
+}
+
 /// `mods` in load order: for the same file, the last one wins.
 fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
     let mut problems = Vec::new();
@@ -806,10 +911,46 @@ fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
             let (ma, mb) = (&a.manifest, &b.manifest);
             let declared = [(ma, mb), (mb, ma)].into_iter().find(|(x, y)| x.conflicts.get(&y.id).is_some_and(|r| satisfies(&y.version, r)));
             if let Some((x, y)) = declared {
-                error(tr!("« {a} » indique être incompatible avec « {b} ».", a = x.name, b = y.name), &[&x.id, &y.id]);
+                error(incompatible(&x.name, &y.name), &[&x.id, &y.id]);
             }
-            if let Some(at) = memory_clash(&a.footprint, &b.footprint) {
-                error(tr!("« {a} » et « {b} » modifient le même code du jeu ({at}).", a = ma.name, b = mb.name, at = format!("{at:08X}")), &[&ma.id, &mb.id]);
+            if memory_clash(&a.footprint, &b.footprint).is_some() {
+                error(incompatible(&ma.name, &mb.name), &[&ma.id, &mb.id]);
+            }
+        }
+    }
+    // a file the launcher makes from the mods' code or texts, which another mod replaces whole
+    for a in mods.iter().filter(|m| !m.footprint.linked.is_empty()) {
+        for b in mods.iter().filter(|b| b.manifest.id != a.manifest.id) {
+            let Some(file) = a.footprint.linked.iter().find(|f| b.footprint.files.binary_search(f).is_ok()) else { continue };
+            problems.push(Problem {
+                level: if file.ends_with("mess.bin") { "warning" } else { "error" },
+                message: if file.ends_with("mess.bin") {
+                    tr!(
+                        "« {b} » remplace en entier un fichier que « {a} » modifie ({file}) : « {b} » doit passer au système de mods compatibles.",
+                        a = a.manifest.name,
+                        b = b.manifest.name,
+                        file = file,
+                    )
+                } else {
+                    incompatible(&a.manifest.name, &b.manifest.name)
+                },
+                packages: vec![a.manifest.id.clone(), b.manifest.id.clone()],
+            });
+        }
+    }
+    // the same text changed by two mods: the last one wins
+    for (i, a) in mods.iter().enumerate() {
+        for b in &mods[i + 1..] {
+            let clash = a.manifest.messages.iter().find_map(|(language, texts)| {
+                let theirs = b.manifest.messages.get(language)?;
+                texts.iter().find(|(key, text)| theirs.get(*key).is_some_and(|t| t != *text)).map(|(key, _)| key.clone())
+            });
+            if let Some(key) = clash {
+                problems.push(Problem {
+                    level: "warning",
+                    message: tr!("« {a} » et « {b} » changent le même texte du jeu ({key}) : celui de « {b} » s’affiche.", a = a.manifest.name, b = b.manifest.name, key = key),
+                    packages: vec![a.manifest.id.clone(), b.manifest.id.clone()],
+                });
             }
         }
     }
@@ -843,10 +984,98 @@ fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
     problems
 }
 
-fn state(dir: &Path, version: Option<&Installed>, settings: &Settings) -> ModsState {
+/// What the launcher links of a package: its code, its settings written into it, its texts.
+fn code_mod(m: &Installed) -> link::CodeMod<'_> {
+    let modules = m.manifest.patches.iter().filter(|p| p.kind == "code").flat_map(|p| p.modules.clone()).collect();
+    let writes = m
+        .manifest
+        .settings
+        .iter()
+        .filter_map(|s| {
+            let slot = s.symbol.as_ref()?;
+            Some((slot.module.clone(), slot.name.clone(), slot.offset, bytes(slot.size, *m.values.get(&s.id)?)))
+        })
+        .collect();
+    link::CodeMod { id: &m.manifest.id, dir: &m.dir, modules, writes, messages: m.manifest.messages.clone(), messages_with: m.manifest.messages_with.clone(), minigames: m.manifest.minigames.clone() }
+}
+
+/// The mods' core (wp-core tools/wpcore_pack.py: the game's code the mods link with), shipped with the launcher.
+pub fn core_dir(app: &AppHandle) -> Option<PathBuf> {
+    // During development it is used straight from src-tauri/core.
+    let dir = if cfg!(debug_assertions) { Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core")) } else { app.path().resource_dir().ok().map(|d| d.join("core")) }?;
+    dir.join("main.sym").is_file().then_some(dir)
+}
+
+/// check, and whether the mods' code links together (`core`: core_dir).
+fn check_all(mods: &[&Installed], game: Option<&str>, core: Option<&Path>) -> Vec<Problem> {
+    only_what_matters(check_with_code(mods, game, core))
+}
+
+/// Mods that can't run together: that alone, once, with nothing else about those mods between them.
+fn only_what_matters(problems: Vec<Problem>) -> Vec<Problem> {
+    let same = |a: &[String], b: &[String]| a.len() == b.len() && a.iter().all(|p| b.contains(p));
+    let pairs: Vec<Vec<String>> = problems.iter().filter(|p| p.level == "error" && p.packages.len() == 2).map(|p| p.packages.clone()).collect();
+    let mut kept: Vec<Problem> = Vec::new();
+    for p in problems {
+        let of_a_pair = pairs.iter().any(|pair| same(pair, &p.packages));
+        if of_a_pair && (p.level != "error" || kept.iter().any(|k| k.level == "error" && same(&k.packages, &p.packages))) {
+            continue;
+        }
+        kept.push(p);
+    }
+    kept
+}
+
+/// link::check_code, which takes seconds, once for the same packages with the same settings: the
+/// mods' state is asked for each time a screen shows them.
+fn check_code_once(core: &Path, mods: &[&Installed], code: &[link::CodeMod]) -> Result<(), link::LinkError> {
+    static CHECKED: std::sync::Mutex<BTreeMap<String, Result<(), link::LinkError>>> = std::sync::Mutex::new(BTreeMap::new());
+    let key: Vec<String> = mods
+        .iter()
+        .map(|m| {
+            let changed = std::fs::metadata(&m.dir).and_then(|f| f.modified()).ok();
+            format!("{} {} {changed:?} {:?}", m.manifest.id, m.manifest.version, m.values)
+        })
+        .collect();
+    let key = key.join("\n");
+    if let Some(known) = CHECKED.lock().unwrap().get(&key) {
+        return known.clone();
+    }
+    let checked = link::check_code(core, code);
+    CHECKED.lock().unwrap().insert(key, checked.clone());
+    checked
+}
+
+fn check_with_code(mods: &[&Installed], game: Option<&str>, core: Option<&Path>) -> Vec<Problem> {
+    let mut problems = check(mods, game);
+    let code: Vec<link::CodeMod> = mods.iter().map(|m| code_mod(m)).collect();
+    if code.iter().all(|c| c.modules.is_empty()) || problems.iter().any(|p| p.level == "error") {
+        return problems;
+    }
+    let packages = |ids: &[String]| if ids.is_empty() { code.iter().filter(|c| !c.modules.is_empty()).map(|c| c.id.to_string()).collect() } else { ids.to_vec() };
+    match core {
+        None => problems.push(Problem { level: "error", message: tr!("Ce build du launcher n’a pas le cœur des mods : mets-le à jour."), packages: packages(&[]) }),
+        Some(core) => {
+            if let Err(e) = check_code_once(core, mods, &code) {
+                let who: Vec<&Installed> = mods.iter().filter(|m| e.mods.contains(&m.manifest.id)).copied().collect();
+                let message = if let [a, b] = who[..] {
+                    incompatible(&a.manifest.name, &b.manifest.name)
+                } else {
+                    let names: Vec<String> = who.iter().map(|m| format!("« {} »", m.manifest.name)).collect();
+                    let who = if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) };
+                    tr!("Le code des mods ne s’assemble pas{who} : {why}", who = who, why = e.message)
+                };
+                problems.push(Problem { level: "error", message, packages: packages(&e.mods) });
+            }
+        }
+    }
+    problems
+}
+
+fn state(dir: &Path, version: Option<&Installed>, settings: &Settings, core: Option<&Path>) -> ModsState {
     let mods = installed(&WPMOD, dir, &settings.package_settings);
     let order = load_order(version, &mods, &settings.enabled_mods);
-    let problems = check(&order, settings.iso.as_ref().map(|d| d.game_id.as_str()));
+    let problems = check_all(&order, settings.iso.as_ref().map(|d| d.game_id.as_str()), core);
     let views = mods
         .iter()
         .map(|m| ModView {
@@ -891,14 +1120,74 @@ pub fn boot_file(app: &AppHandle, disc: &Disc, settings: &Settings) -> Result<Op
         if let Some(xml) = settings_xml(m) {
             std::fs::write(settings_file(&dir, m), xml).map_err(io)?;
         }
+        if let Some(xml) = files_xml(m) {
+            std::fs::write(files_file(&dir, m), xml).map_err(io)?;
+        }
     }
-    let errors: Vec<String> = check(&order, Some(&disc.game_id)).into_iter().filter(|p| p.level == "error").map(|p| p.message).collect();
+    let errors: Vec<String> = check_all(&order, Some(&disc.game_id), core_dir(app).as_deref()).into_iter().filter(|p| p.level == "error").map(|p| p.message).collect();
     if !errors.is_empty() {
         return Err(errors.join(" "));
     }
+    let linked = order.iter().any(|m| !m.footprint.linked.is_empty() || m.manifest.patches.iter().any(|p| p.kind == "code")).then(|| linked_dir(&dir));
     let path = dir.join(".launch.json");
-    std::fs::write(&path, descriptor(disc, &order, &dir).to_string()).map_err(io)?;
+    std::fs::write(&path, descriptor(disc, &order, &dir, linked.as_deref()).to_string()).map_err(io)?;
     Ok(Some(path))
+}
+
+/// Where link_code puts what it makes (the descriptor names its linked.xml).
+fn linked_dir(dir: &Path) -> PathBuf {
+    dir.join(".linked")
+}
+
+/// Before a launch (after boot_file): the mods' code linked with the core, and their texts applied to
+/// the disc's message files (taken from the player's disc the first time).
+pub async fn link_code(app: &AppHandle, disc: &Disc, packages: &[&Installed]) -> Result<(), String> {
+    let code: Vec<link::CodeMod> = packages.iter().map(|m| code_mod(m)).collect();
+    if code.iter().all(|c| c.modules.is_empty() && c.messages.is_empty()) {
+        return Ok(());
+    }
+    let core = core_dir(app).ok_or_else(|| tr!("Ce build du launcher n’a pas le cœur des mods : mets-le à jour."))?;
+    let wanted: Vec<String> = code
+        .iter()
+        .flat_map(|c| c.messages.keys().chain(c.messages_with.values().flat_map(|l| l.keys())).map(|l| link::messages_file(l)))
+        .collect();
+    let taken = crate::rebuild::disc_files(app, disc, &wanted).await?;
+    let read = |file: &str| std::fs::read(crate::rebuild::disc_file(&taken, file)).map_err(|_| tr!("Impossible de lire {file} sur ton ISO.", file = file));
+    let out = linked_dir(&data_dir(app, "mods")?);
+    let names: BTreeMap<&str, String> = packages.iter().map(|m| (m.manifest.id.as_str(), m.manifest.name.to_string())).collect();
+    link::link_game(&core, &read, &code, &out).map(|_| ()).map_err(|e| {
+        let who: Vec<String> = e.mods.iter().filter_map(|id| names.get(id.as_str())).map(|n| format!("« {n} »")).collect();
+        let who = if who.is_empty() { String::new() } else { format!(" ({})", who.join(", ")) };
+        tr!("Le code des mods ne s’assemble pas{who} : {why}", who = who, why = e.message)
+    })
+}
+
+fn files_file(dir: &Path, m: &Installed) -> PathBuf {
+    dir.join(format!(".files-{}.xml", m.manifest.id))
+}
+
+/// The Riivolution XML of the package's "files" patches, if it has any.
+fn files_xml(m: &Installed) -> Option<String> {
+    let lines: Vec<String> = m
+        .manifest
+        .patches
+        .iter()
+        .filter(|p| p.kind == "files")
+        .flat_map(|p| &p.files)
+        // (external from "/": the descriptor's root, the package; otherwise it would be the XML's folder)
+        .map(|f| format!(r#"<file disc="{}" external="/{}" create="true"/>"#, xml_escape(&f.disc), xml_escape(f.file.trim_start_matches('/'))))
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(format!(
+        r#"<wiidisc version="1"><options><section name="{SETTINGS_SECTION}"><option name="{FILES_OPTION}"><choice name="On"><patch id="files"/></choice></option></section></options><patch id="files">{}</patch></wiidisc>"#,
+        lines.join("")
+    ))
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 fn settings_file(dir: &Path, m: &Installed) -> PathBuf {
@@ -927,13 +1216,14 @@ fn settings_xml(m: &Installed) -> Option<String> {
 }
 
 /// Dolphin's game mod descriptor (DiscIO/GameModDescriptor.cpp in the fork).
-/// `dir`: where boot_file wrote the settings XML.
-fn descriptor(disc: &Disc, mods: &[&Installed], dir: &Path) -> serde_json::Value {
+/// `dir`: where boot_file wrote the settings XML. `linked`: link_code's folder, last (its files are
+/// made from every mod's).
+fn descriptor(disc: &Disc, mods: &[&Installed], dir: &Path, linked: Option<&Path>) -> serde_json::Value {
     let option = |section: &str, option: &str, choice: usize| json!({ "section-name": section, "option-name": option, "choice": choice });
     let patches: Vec<_> = mods
         .iter()
         .flat_map(|m| {
-            let own = m.manifest.patches.iter().map(move |p| {
+            let own = m.manifest.patches.iter().filter(|p| p.kind == "riivolution").map(move |p| {
                 let fixed = p.options.iter().map(|o| option(&o.section, &o.option, o.choice));
                 let chosen = m.manifest.settings.iter().filter_map(|s| {
                     let binding = s.riivolution.as_ref().filter(|b| b.xml == p.xml)?;
@@ -944,8 +1234,10 @@ fn descriptor(disc: &Disc, mods: &[&Installed], dir: &Path) -> serde_json::Value
             });
             let memory = settings_xml(m)
                 .map(|_| json!({ "xml": settings_file(dir, m), "root": m.dir, "options": [option(SETTINGS_SECTION, SETTINGS_OPTION, 1)] }));
-            own.chain(memory)
+            let files = files_xml(m).map(|_| json!({ "xml": files_file(dir, m), "root": m.dir, "options": [option(SETTINGS_SECTION, FILES_OPTION, 1)] }));
+            own.chain(memory).chain(files)
         })
+        .chain(linked.map(|l| json!({ "xml": l.join("linked.xml"), "root": l, "options": [option(SETTINGS_SECTION, CODE_OPTION, 1)] })))
         .collect();
     json!({
         "type": "dolphin-game-mod-descriptor",
@@ -959,7 +1251,7 @@ fn descriptor(disc: &Disc, mods: &[&Installed], dir: &Path) -> serde_json::Value
 fn current(app: &AppHandle) -> Result<ModsState, String> {
     let settings = app.state::<Store>().get(app);
     let version = versions::active(app, &settings)?;
-    Ok(state(&data_dir(app, "mods")?, version.as_ref(), &settings))
+    Ok(state(&data_dir(app, "mods")?, version.as_ref(), &settings, core_dir(app).as_deref()))
 }
 
 fn refuse_while_playing(app: &AppHandle) -> Result<(), String> {
@@ -970,7 +1262,7 @@ fn refuse_while_playing(app: &AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn mods_list(app: AppHandle) -> Result<ModsState, String> {
+pub async fn mods_list(app: AppHandle) -> Result<ModsState, String> {
     current(&app)
 }
 
@@ -1024,7 +1316,7 @@ pub async fn mods_pick(app: AppHandle) -> Result<Option<Imported>, String> {
 }
 
 #[tauri::command]
-pub fn mods_set_enabled(app: AppHandle, id: String, on: bool) -> Result<ModsState, String> {
+pub async fn mods_set_enabled(app: AppHandle, id: String, on: bool) -> Result<ModsState, String> {
     app.state::<Store>().update(&app, |s| {
         s.enabled_mods.retain(|m| m != &id);
         if on {
@@ -1035,7 +1327,7 @@ pub fn mods_set_enabled(app: AppHandle, id: String, on: bool) -> Result<ModsStat
 }
 
 #[tauri::command]
-pub fn mods_remove(app: AppHandle, id: String) -> Result<ModsState, String> {
+pub async fn mods_remove(app: AppHandle, id: String) -> Result<ModsState, String> {
     refuse_while_playing(&app)?;
     let dir = data_dir(&app, "mods")?;
     // Only something listed as a mod: an id comes from the page.
@@ -1101,7 +1393,7 @@ fn everything(app: &AppHandle, settings: &Settings) -> Result<(Vec<Installed>, V
     let mods = installed(&WPMOD, &data_dir(app, "mods")?, &settings.package_settings);
     let versions = versions::all(app, &settings.package_settings)?;
     let version = versions.iter().find(|v| settings.active_version.as_ref() == Some(&v.manifest.id));
-    let problems = check(&load_order(version, &mods, &settings.enabled_mods), settings.iso.as_ref().map(|d| d.game_id.as_str()));
+    let problems = check_all(&load_order(version, &mods, &settings.enabled_mods), settings.iso.as_ref().map(|d| d.game_id.as_str()), core_dir(app).as_deref());
     Ok((mods, versions, problems))
 }
 
@@ -1298,6 +1590,69 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A mod of the compatible system: code, files and texts, no Riivolution XML.
+    fn code_mod_with(dir: &Path, id: &str, text: &str, setting_module: &str) -> Result<Installed, String> {
+        let json = format!(
+            r#"{{"format":1,"id":"{id}","name":"{id}","version":"2.0.0","games":["SUPP01"],
+            "settings":[{{"id":"r","type":"number","label":"R","default":14,"min":8,"max":25,"symbol":{{"module":"{setting_module}","name":"gR"}}}}],
+            "messages":{{"fr_EU":{{"m031_2700":"{text}"}}}},
+            "patches":[{{"type":"code","modules":{{"mr001":{{"objects":["code/x.o"],"hooks":{{"Board_start":"F"}},"save":{{"symbol":"gAt","size":2}}}}}}}},
+                       {{"type":"files","files":[{{"disc":"/mr001/Lava.brres.lz","file":"lava.brres.lz"}}]}}]}}"#
+        );
+        let path = dir.join("in").join(format!("{id}.wpmod"));
+        package(&path, &[("mod.json", &json), ("code/x.o", "o"), ("lava.brres.lz", "l")]);
+        install(&WPMOD, &path, &dir.join("mods"))?;
+        Ok(installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap())
+    }
+
+    #[test]
+    fn reads_mods_of_the_compatible_system() {
+        let dir = scratch("code");
+        let a = code_mod_with(&dir, "a", "texte", "mr001").unwrap();
+        assert_eq!(a.footprint.linked, ["/locale/fr_eu/mess.bin", "/rel/mr001.rel.lz"]);
+        assert_eq!(a.footprint.files, ["/mr001/lava.brres.lz"]);
+        let code = code_mod(&a);
+        assert_eq!(code.writes, [("mr001".to_string(), "gR".to_string(), 0, vec![0, 0, 0, 14])]);
+        assert_eq!(code.modules["mr001"].hooks["Board_start"], "F");
+        assert_eq!(code.messages["fr_EU"]["m031_2700"], "texte");
+        assert!(files_xml(&a).unwrap().contains(r#"<file disc="/mr001/Lava.brres.lz" external="/lava.brres.lz" create="true"/>"#));
+        let e = code_mod_with(&dir, "bad", "x", "main").err().unwrap();
+        assert!(e.contains("variable"), "{e}");
+
+        // texts: the same key, two texts
+        let b = code_mod_with(&dir, "b", "autre", "mr001").unwrap();
+        let problems = check(&[&a, &b], None);
+        assert!(problems.iter().any(|p| p.level == "warning" && p.message.contains("m031_2700")), "{problems:?}");
+        assert!(!problems.iter().any(|p| p.level == "error"), "{problems:?}");
+        // a mod that replaces the board's module whole, or a message file
+        let whole = mod_with(&dir, "whole", "", r#"<file disc="/rel/mr001.rel.lz" external="a.bin"/>"#);
+        assert!(check(&[&a, &whole], None).iter().any(|p| p.level == "error" && p.packages.contains(&"whole".to_string())));
+        let texts = mod_with(&dir, "texts", "", r#"<file disc="/locale/fr_EU/mess.bin" external="a.bin"/>"#);
+        assert_eq!(levels(&check(&[&texts, &a], None)), ["warning"]);
+        // its descriptor: the files patch, then the linked XML last
+        let disc = Disc { path: "/g.rvz".into(), name: String::new(), game_id: "SUPP01".into(), country: String::new() };
+        let d = descriptor(&disc, &[&a], &dir, Some(&dir.join(".linked")));
+        let patches = d["riivolution"]["patches"].as_array().unwrap();
+        assert_eq!(patches.len(), 2);
+        assert_eq!(patches[1]["options"][0]["option-name"], "Code");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn incompatible_mods_get_one_message() {
+        let problem = |level, message: &str, packages: &[&str]| Problem { level, message: message.to_string(), packages: packages.iter().map(|p| p.to_string()).collect() };
+        let kept = only_what_matters(vec![
+            problem("warning", "same text", &["a", "b"]),
+            problem("warning", "same file", &["b", "a"]),
+            problem("error", "incompatible", &["a", "b"]),
+            problem("error", "incompatible again", &["b", "a"]),
+            problem("warning", "same file", &["a", "c"]),
+            problem("error", "wrong disc", &["a"]),
+        ]);
+        let messages: Vec<&str> = kept.iter().map(|p| p.message.as_str()).collect();
+        assert_eq!(messages, ["incompatible", "same file", "wrong disc"]);
+    }
+
     #[test]
     fn finds_what_mods_share() {
         let dir = scratch("shared");
@@ -1337,7 +1692,7 @@ mod tests {
         let dir = scratch("boot");
         let a = mod_with(&dir, "a", "", "");
         let disc = Disc { path: "/jeux/wp.rvz".into(), name: "wp.rvz".into(), game_id: "SUPP01".into(), country: "Europe".into() };
-        let d = descriptor(&disc, &[&a], &dir);
+        let d = descriptor(&disc, &[&a], &dir, None);
         assert_eq!(d["type"], "dolphin-game-mod-descriptor");
         assert_eq!(d["base-file"], "/jeux/wp.rvz");
         let patch = &d["riivolution"]["patches"][0];
@@ -1386,13 +1741,13 @@ mod tests {
         assert_eq!(read(r#"{"de":9}"#).values["de"], 3);
 
         let disc = Disc { path: "/jeux/wp.rvz".into(), name: "wp.rvz".into(), game_id: "SUPP01".into(), country: "Europe".into() };
-        let d = descriptor(&disc, &[&chosen], &dir);
+        let d = descriptor(&disc, &[&chosen], &dir, None);
         let patches = &d["riivolution"]["patches"];
         assert_eq!(patches[0]["options"][1], json!({ "section-name": "S", "option-name": "Neige", "choice": 2 }));
         assert_eq!(patches[1]["xml"], dir.join(".settings-s.xml").to_string_lossy().as_ref());
         assert_eq!(patches[1]["options"][0], json!({ "section-name": SETTINGS_SECTION, "option-name": SETTINGS_OPTION, "choice": 1 }));
         assert!(settings_xml(&chosen).unwrap().contains(r#"<memory offset="0x80001800" value="05"/>"#));
-        let off = descriptor(&disc, &[&read(r#"{"neige":0}"#)], &dir);
+        let off = descriptor(&disc, &[&read(r#"{"neige":0}"#)], &dir, None);
         assert_eq!(off["riivolution"]["patches"][0]["options"].as_array().unwrap().len(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }

@@ -130,10 +130,12 @@
             {#snippet versionLink()}{@render action(t('Changer'), () => (location.hash = '#/Versions'))}{/snippet}
             {#snippet autostart()}{@render toggle(t('Ouvrir au démarrage de l’ordinateur'), 'autostart')}{/snippet}
             {#snippet minimize()}{@render toggle(t('Réduire pendant la partie'), 'minimizeInGame')}{/snippet}
+            {#snippet discord()}{@render toggle(t('Afficher la partie sur Discord'), 'discordPresence')}{/snippet}
             {@render row(t('Langue du launcher'), t('Automatique suit la langue de l’ordinateur'), launcherLanguage)}
             {@render row(t('Version'), t('{version} : elle décide du jeu et du thème du launcher', { version: local(activeVersion()?.name) ?? t('Wii Party d’origine') }), versionLink)}
             {@render row(t('Ouvrir au démarrage de l’ordinateur'), t('Le launcher s’ouvre quand tu allumes l’ordinateur'), autostart)}
-            {@render row(t('Réduire pendant la partie'), t('Le launcher se range dans la barre des tâches et revient à la fin'), minimize, true)}
+            {@render row(t('Réduire pendant la partie'), t('Le launcher se range dans la barre des tâches et revient à la fin'), minimize)}
+            {@render row(t('Afficher la partie sur Discord'), t('Tes amis voient si tu es dans le launcher, dans quel mode et à quel mini-jeu tu joues'), discord, true)}
           {:else if sec === 1}
             {#snippet iso()}{@render action(settings.iso ? t('Changer') : t('Choisir'), changeIso)}{/snippet}
             {#snippet always()}{@render toggle(t('Toujours utiliser cet ISO'), 'alwaysUseIso')}{/snippet}

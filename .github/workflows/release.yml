@@ -7,8 +7,7 @@
 # Secrets of this repository:
 #   RELEASES_TOKEN               a token that may write the releases of prstance/wp-launcher
 #   TAURI_SIGNING_PRIVATE_KEY    ~/.tauri/partylauncher.key (its contents)
-# The shipped versions (src-tauri/versions/*.wpver, made with --disc: no game
-# file inside) must be in the repository.
+# The mods' core (src-tauri/core/, wp-core's export) must be in the repository.
 name: Release
 
 on:
@@ -41,9 +40,9 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev patchelf \
             libusb-1.0-0 libasound2t64 libegl1
       - run: npm ci
-      - name: Shipped versions
+      - name: The mods' core
         shell: bash
-        run: ls src-tauri/versions/*.wpver
+        run: ls src-tauri/core/main.sym src-tauri/core/*.plf
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}

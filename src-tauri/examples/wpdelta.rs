@@ -4,6 +4,11 @@
 //!
 //! jobs.json: [{"source": "…", "result": "…", "out": "…", "lz": true}, …]. Prints
 //! one line per delta: its size against the result's.
+//!
+//!   cargo run --release --example wpdelta -- --apply <unpacked package> <extracted disc>
+//!
+//! makes the package's files from the disc as the launcher does before a launch (rebuild.rs), to try
+//! it out of the launcher.
 
 #[path = "../src/delta.rs"]
 mod delta;
@@ -21,8 +26,31 @@ struct Job {
     lz: bool,
 }
 
+fn apply(package: &std::path::Path, disc: &std::path::Path) {
+    let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(package.join("mod.json")).or_else(|_| std::fs::read_to_string(package.join("version.json"))).unwrap()).unwrap();
+    for p in m["patches"].as_array().unwrap().iter().filter(|p| p["type"] == "delta") {
+        for f in p["files"].as_array().unwrap() {
+            let (from, file) = (f["disc"].as_str().unwrap(), f["file"].as_str().unwrap());
+            let source = match from {
+                "main.dol" => disc.join("sys/main.dol"),
+                d => disc.join("files").join(d.trim_start_matches('/')),
+            };
+            let made = delta::apply(&std::fs::read(package.join(f["delta"].as_str().unwrap())).unwrap(), &std::fs::read(&source).unwrap())
+                .unwrap_or_else(|e| panic!("{file}: {e:?}"));
+            let out = package.join(file);
+            std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+            std::fs::write(&out, made).unwrap();
+            println!("{file}");
+        }
+    }
+}
+
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: wpdelta jobs.json");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--apply") {
+        return apply(args[1].as_ref(), args[2].as_ref());
+    }
+    let path = args.first().expect("usage: wpdelta jobs.json");
     let jobs: Vec<Job> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     for job in jobs {
         let (source, result) = (std::fs::read(&job.source).unwrap(), std::fs::read(&job.result).unwrap());

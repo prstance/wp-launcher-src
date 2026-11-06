@@ -365,5 +365,19 @@
         "size": 1
       }
     }
-  ]
+  ],
+  "minigame_names": {
+    "425": {
+      "fr": "Banquise en miettes",
+      "en": "Floe Fight"
+    },
+    "429": {
+      "fr": "Pêche blanche",
+      "en": "Ice Fishing"
+    },
+    "444": {
+      "fr": "Boule de neige",
+      "en": "Snowball Toss"
+    }
+  }
 }

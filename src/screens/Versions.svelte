@@ -1,6 +1,7 @@
 <script>
   import Sidebar from '../components/Sidebar.svelte';
   import PackageDrop from '../components/PackageDrop.svelte';
+  import Notes from '../components/Notes.svelte';
   import { inTauri } from '../lib/tauri.js';
   import { versions, activeVersion, activateVersion, importVersions, pickVersion, removeVersion } from '../lib/versions.svelte.js';
   import { mods } from '../lib/mods.svelte.js';
@@ -9,6 +10,12 @@
   let busy = $state(false);
   let added = $state([]);
   let refused = $state([]);
+
+  const notes = $derived([
+    ...[...refused, ...(versions.error ? [versions.error] : [])].map((message) => ({ level: 'error', message })),
+    ...mods.problems.filter((p) => p.level === 'error'),
+    ...(added.length ? [{ level: 'ok', message: t('Installée : {names}', { names: added.join(', ') }) }] : []),
+  ]);
 
   const size = (bytes) => (bytes < 1024 * 1024 ? t('{n} Ko', { n: Math.ceil(bytes / 1024) }) : t('{n} Mo', { n: Math.round(bytes / 1024 / 1024).toLocaleString(lang()) }));
   const details = (v) => [t('Version {v}', { v: v.version }), ...(v.authors.length ? [v.authors.join(', ')] : []), v.games.join(', '), size(v.size), ...(v.shipped ? [t('Fournie avec le launcher')] : [])].join(' · ');
@@ -71,15 +78,7 @@
     <section aria-label={t('Versions installées')} style="flex-grow: 1; min-height: 0; background: #ffffff; border-radius: 28px; padding: 20px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 12px;">
       <PackageDrop title={t('Dépose une version ici')} hint={t('Fichier .wpver')} {busy} ondrop={(paths) => attempt(() => importVersions(paths))} onbrowse={() => attempt(pickVersion)} />
 
-      {#if added.length}
-        <p role="status" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #d9f0dd; font-size: 13px; font-weight: 700; color: #17532a; overflow-wrap: anywhere;">{t('Installée : {names}', { names: added.join(', ') })}</p>
-      {/if}
-      {#each [...refused, ...(versions.error ? [versions.error] : [])] as message}
-        <p role="alert" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424; overflow-wrap: anywhere;">{message}</p>
-      {/each}
-      {#each mods.problems.filter((p) => p.level === 'error') as problem}
-        <p role="alert" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424; overflow-wrap: anywhere;">{t('Le jeu ne se lancera pas : {message}', { message: problem.message })}</p>
-      {/each}
+      <Notes {notes} />
 
       <ul style="flex: 1 1 0; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;">
         {#each versions.list as v (v.id)}

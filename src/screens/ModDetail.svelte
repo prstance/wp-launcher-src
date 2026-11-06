@@ -4,6 +4,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import Sidebar from '../components/Sidebar.svelte';
   import Select from '../components/Select.svelte';
+  import Notes from '../components/Notes.svelte';
   import { inTauri } from '../lib/tauri.js';
   import { router } from '../lib/router.svelte.js';
   import { t, plural, lang, local } from '../lib/i18n.svelte.js';
@@ -228,13 +229,7 @@
           {/snippet}
           {@render card(t('Ce qu’il modifie'), changesBody)}
 
-          {#each detail.problems as problem}
-            {@render note(problem.level, problem.level === 'error' ? t('Le jeu ne se lancera pas : {message}', { message: problem.message }) : problem.message)}
-          {:else}
-            {#if detail.enabled}
-              {@render note('ok', t('Aucun conflit avec les autres mods activés.'))}
-            {/if}
-          {/each}
+          <Notes notes={detail.problems.length ? detail.problems : detail.enabled ? [{ level: 'ok', message: t('Aucun conflit avec les autres mods activés.') }] : []} />
 
           {#if !detail.shipped}
             <button type="button" onclick={remove} disabled={busy} style="align-self: flex-start; height: 38px; padding: 0 16px; border: 0; border-radius: 999px; cursor: pointer; background: #ffffff; box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: #a3283c;">{isVersion ? t('Retirer cette version') : t('Retirer ce mod')}</button>

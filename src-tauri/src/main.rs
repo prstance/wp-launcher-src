@@ -1,9 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod delta;
+mod discord;
 mod game;
 mod i18n;
+mod link;
 mod lz;
+mod minigames;
 mod mii;
 mod modes;
 mod mods;
@@ -31,6 +34,8 @@ fn main() {
         .setup(|app| {
             i18n::init(&app.state::<settings::Store>().get(app.handle()).language);
             app.manage(wiimote::start(app.handle().clone()));
+            app.manage(discord::start());
+            discord::refresh(app.handle());
             mii::prepare(app.handle());
             if let Some(win) = app.get_webview_window("main") {
                 window::init(&win);

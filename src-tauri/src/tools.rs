@@ -43,6 +43,12 @@ fn tools_dir(app: &AppHandle) -> Option<PathBuf> {
 
 /// Executable of a shipped tool, if this build has it.
 pub fn find(app: &AppHandle, id: &str) -> Option<(String, PathBuf)> {
+    // During development, a build of the Dolphin fork that isn't released yet.
+    if cfg!(debug_assertions) && id == "dolphin" {
+        if let Some(bin) = std::env::var_os("WP_DOLPHIN").map(PathBuf::from).filter(|b| b.is_file()) {
+            return Some(("dev".to_string(), bin));
+        }
+    }
     let dir = tools_dir(app)?.join(id);
     let marker: Marker = serde_json::from_slice(&std::fs::read(dir.join("installed.json")).ok()?).ok()?;
     let bin = dir.join(&marker.bin);

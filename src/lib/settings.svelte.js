@@ -17,6 +17,7 @@ export const settings = $state({
   showFps: false,
   volume: 100,
   minimizeInGame: true,
+  discordPresence: true,
   language: "auto", // "fr", "en", "es" or "auto" (lib/i18n.svelte.js)
   autostart: false,
 });

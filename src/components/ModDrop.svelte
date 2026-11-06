@@ -2,12 +2,20 @@
   import { invoke } from '@tauri-apps/api/core';
   import { inTauri } from '../lib/tauri.js';
   import PackageDrop from './PackageDrop.svelte';
+  import Notes from './Notes.svelte';
   import { mods, enabledMods, refreshMods, importMods, pickMods, setModEnabled, removeMod } from '../lib/mods.svelte.js';
   import { t, lang, local } from '../lib/i18n.svelte.js';
 
   let busy = $state(false);
   let added = $state([]);
   let refused = $state([]);
+
+  const notes = $derived([
+    ...refused.map((message) => ({ level: 'error', message })),
+    ...mods.problems,
+    ...(added.length ? [{ level: 'ok', message: t('Installé : {names}', { names: added.join(', ') }) }] : []),
+    ...(!mods.problems.length && enabledMods().length + (mods.version ? 1 : 0) > 1 ? [{ level: 'ok', message: t('Aucun conflit détecté entre les mods activés.') }] : []),
+  ]);
 
   const size = (bytes) =>
     bytes < 1024 * 1024
@@ -45,20 +53,7 @@
 <div style="height: 100%; display: flex; flex-direction: column; gap: 12px;">
   <PackageDrop title={t('Dépose tes mods ici')} hint={t('Fichiers .wpmod')} {busy} ondrop={(paths) => attempt(() => importMods(paths))} onbrowse={browse} />
 
-  {#if added.length}
-    <p role="status" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #d9f0dd; font-size: 13px; font-weight: 700; color: #17532a; overflow-wrap: anywhere;">{t('Installé : {names}', { names: added.join(', ') })}</p>
-  {/if}
-  {#each refused as message}
-    <p role="alert" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424; overflow-wrap: anywhere;">{message}</p>
-  {/each}
-
-  {#each mods.problems as problem}
-    <p role={problem.level === 'error' ? 'alert' : 'status'} style="margin: 0; padding: 8px 14px; border-radius: 14px; background: {problem.level === 'error' ? '#fde0e0' : '#f8e6c6'}; font-size: 13px; font-weight: 700; color: {problem.level === 'error' ? '#7a1424' : '#6b4100'}; overflow-wrap: anywhere;">{problem.level === 'error' ? t('Le jeu ne se lancera pas : {message}', { message: problem.message }) : problem.message}</p>
-  {:else}
-    {#if enabledMods().length + (mods.version ? 1 : 0) > 1}
-      <p role="status" style="margin: 0; padding: 8px 14px; border-radius: 14px; background: #d9f0dd; font-size: 13px; font-weight: 700; color: #17532a;">{t('Aucun conflit détecté entre les mods activés.')}</p>
-    {/if}
-  {/each}
+  <Notes {notes} />
 
   <ul aria-label={t('Mods installés')} style="flex: 1 1 0; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
     {#each mods.list as mod (mod.id)}

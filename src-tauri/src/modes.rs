@@ -10,6 +10,7 @@ use crate::settings::{Disc, Store};
 use crate::versions;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 use tauri::{AppHandle, Manager};
 
 struct Mode {
@@ -45,6 +46,37 @@ const MODES: [Mode; 13] = [
 
 const THUMBNAILS: &str = "layout/inst/thumbnail.arc.lz";
 const TEXTS: &str = "mess.bin";
+
+/// The game modes by their id in the save block (wii_party_notes.txt), and their
+/// name in mess.bin; those of the Minigames menu follow its own name.
+const GAME_MODES: [(i32, &str); 20] = [
+    (0, "mn_gtex013"),
+    (1, "mn_gtex016"),
+    (3, "mn_gtex014"),
+    (4, "mn_gtex015"),
+    (5, "mn_gtex019"),
+    (6, "mn_gtex019"),
+    (7, "mn_gtex018"),
+    (8, "mn_gtex022"),
+    (9, "mn_gtex027"),
+    (11, "mn_gtex025"),
+    (12, "mn_gtex026"),
+    (13, "mn_gtex023"),
+    (15, "mn_gtex024"),
+    (16, "mn_gtex017"),
+    (17, "mn_gtex012"),
+    (18, "mn_gtex007"),
+    (19, "mn_gtex009"),
+    (20, "mn_gtex009"),
+    (22, "mn_gtex011"),
+    (23, "mn_gtex010"),
+];
+const MINIGAMES_MENU: &str = "mn_gtex004";
+/// The first of the Minigames menu's modes.
+const FIRST_MINIGAME_MODE: i32 = 17;
+
+/// One at a time: the first call takes the files from the disc.
+static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A mode of the game, or one a version brings ("version").
 pub fn is_known(id: &str) -> bool {
@@ -187,8 +219,6 @@ fn with_theme(mut modes: Vec<ModeView>, art: Vec<versions::ModeArt>) -> Vec<Mode
 /// so (modesOnly), only those of its theme.
 #[tauri::command]
 pub async fn modes_get(app: AppHandle, lang: String) -> Result<Vec<ModeView>, String> {
-    // One at a time: the first call takes the files from the disc.
-    static BUSY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _busy = BUSY.lock().await;
     let settings = app.state::<Store>().get(&app);
     let version = versions::active(&app, &settings)?;
@@ -199,6 +229,33 @@ pub async fn modes_get(app: AppHandle, lang: String) -> Result<Vec<ModeView>, St
     let (thumbnails, original, texts) = with_version(from_disc(&app, disc, &lang).await?, version.as_ref());
     let modes = tauri::async_runtime::spawn_blocking(move || read(&thumbnails, &texts, original.as_deref())).await.map_err(|e| e.to_string())??;
     Ok(with_theme(modes, art))
+}
+
+/// The game modes' names by their id, as the menu writes them with the active
+/// version, in `lang` ("Minigames · Free Play" for those of the Minigames menu).
+pub async fn game_mode_names(app: &AppHandle, lang: &str) -> Result<BTreeMap<i32, String>, String> {
+    let _busy = BUSY.lock().await;
+    let settings = app.state::<Store>().get(app);
+    let disc = settings.iso.as_ref().ok_or("pas d’ISO")?;
+    let version = versions::active(app, &settings)?;
+    let (_, _, texts) = with_version(from_disc(app, disc, lang).await?, version.as_ref());
+    let texts = disc::xmsg_texts(&texts).ok_or("mess.bin illisible")?;
+    Ok(mode_names(&texts))
+}
+
+fn mode_names(texts: &HashMap<String, String>) -> BTreeMap<i32, String> {
+    let name = |key: &str| texts.get(key).map(|t| plain(t)).filter(|n| !n.is_empty());
+    let menu = name(MINIGAMES_MENU);
+    GAME_MODES
+        .iter()
+        .filter_map(|&(id, key)| {
+            let mode = name(key)?;
+            Some((id, match &menu {
+                Some(menu) if id >= FIRST_MINIGAME_MODE => format!("{menu} · {mode}"),
+                _ => mode,
+            }))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -219,6 +276,15 @@ mod tests {
         let modes = with_theme(vec![mode("a"), mode("b")], vec![art("new", Some("Neuf")), art("b", None)]);
         let shown: Vec<_> = modes.iter().map(|m| (m.id.as_str(), m.name.as_str(), m.image.as_str(), m.stock)).collect();
         assert_eq!(shown, [("new", "Neuf", "theme", false), ("b", "b", "theme", false), ("a", "a", "disc", true)]);
+    }
+
+    #[test]
+    fn names_the_game_modes() {
+        let texts: HashMap<String, String> =
+            [("mn_gtex004", "Mini-jeux"), ("mn_gtex013", "[c:#dc2814ff]Ile aux défis"), ("mn_gtex007", "Libre")].map(|(k, v)| (k.into(), v.into())).into();
+        let names = mode_names(&texts);
+        assert_eq!((names[&0].as_str(), names[&18].as_str()), ("Ile aux défis", "Mini-jeux · Libre"));
+        assert!(!names.contains_key(&3));
     }
 
     #[test]

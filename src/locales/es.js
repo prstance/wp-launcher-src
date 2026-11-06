@@ -1,5 +1,6 @@
 // Spanish for the launcher's texts, written in French in the code (lib/i18n.svelte.js).
 export default {
+  "Notification suivante": "Siguiente aviso",
   "Réduire": "Minimizar",
   "Agrandir": "Maximizar",
   "Fermer": "Cerrar",
@@ -169,6 +170,8 @@ export default {
   "{version} : elle décide du jeu et du thème du launcher": "{version}: decide el juego y el tema del launcher",
   "Le launcher s’ouvre quand tu allumes l’ordinateur": "El launcher se abre al encender el ordenador",
   "Le launcher se range dans la barre des tâches et revient à la fin": "El launcher se guarda en la barra de tareas y vuelve al terminar",
+  "Afficher la partie sur Discord": "Mostrar la partida en Discord",
+  "Tes amis voient si tu es dans le launcher, dans quel mode et à quel mini-jeu tu joues": "Tus amigos ven si estás en el launcher, en qué modo estás y a qué minijuego juegas",
   "Choisir": "Elegir",
   "Toujours utiliser cet ISO": "Usar siempre esta ISO",
   "Vérifier l’ISO à chaque lancement": "Comprobar la ISO en cada inicio",
@@ -217,7 +220,6 @@ export default {
   "Dépose une version ici": "Suelta una versión aquí",
   "Fichier .wpver": "Archivo .wpver",
   "Installée : {names}": "Instalada: {names}",
-  "Le jeu ne se lancera pas : {message}": "El juego no se iniciará: {message}",
   "Ton ISO, sans version": "Tu ISO, sin versión",
   "Le jeu tel qu’il est sur ton disque, et le launcher en rose.": "El juego tal cual está en tu disco, y el launcher en rosa.",
   "Sources": "Fuentes",

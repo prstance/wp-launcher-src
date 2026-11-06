@@ -113,6 +113,42 @@ fn make_one(job: &Job, out: &Path) -> Result<(), String> {
     std::fs::rename(&part, &to).map_err(|e| e.to_string())
 }
 
+/// Files of the player's disc (disc paths, "/locale/fr_EU/mess.bin"), taken once into a folder kept for
+/// the next launches (the mods' texts are applied to the disc's message files): where they are.
+pub async fn disc_files(app: &AppHandle, disc: &Disc, files: &[String]) -> Result<PathBuf, String> {
+    let out = game::data_dir(app, "mods")?.join(".disc");
+    // (the folder is for one disc: another one, or the same one changed, starts it again)
+    let size = std::fs::metadata(&disc.path).map(|m| m.len()).unwrap_or(0);
+    let stamp = format!("{}\n{size}\n", disc.path);
+    if std::fs::read_to_string(out.join("disc.txt")).ok().as_deref() != Some(stamp.as_str()) {
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+        std::fs::write(out.join("disc.txt"), &stamp).map_err(|e| e.to_string())?;
+    }
+    let tool = tools::dolphin_tool(app).ok_or_else(|| tr!("Dolphin est absent de ce build du launcher."))?;
+    for file in files {
+        let path = single(file);
+        if extracted(&out, &path).is_file() {
+            continue;
+        }
+        let output = game::command(&tool)
+            .args(["extract", "-q", "-i", &disc.path, "-p", "DATA", "-s", &path, "-o"])
+            .arg(&out)
+            .output()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() || !extracted(&out, &path).is_file() {
+            return Err(tr!("Impossible de lire {file} sur ton ISO.", file = path));
+        }
+    }
+    Ok(out)
+}
+
+/// A disc file taken by disc_files.
+pub fn disc_file(dir: &Path, file: &str) -> PathBuf {
+    extracted(dir, &single(file))
+}
+
 /// Whether some files are still to make.
 pub fn needed(packages: &[&Installed]) -> bool {
     !missing(packages).is_empty()
