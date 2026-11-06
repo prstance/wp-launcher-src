@@ -5,7 +5,7 @@ The mod keeps them in main.dol, one byte each (wp-winter, include/wp/WinterSetti
 gWinterSettings moves with every build, so this reads it again in the build's main.MAP, then
 checks that main.dol holds there the defaults of the manifest's settings.
 
-  python3 scripts/winter-settings.py ../wp-winter/build/SUPP01 [--manifest themes/mode-hiver/manifest.json]
+  python3 scripts/winter-settings.py ../../mods/wp-winter/build/SUPP01 [--manifest themes/mode-hiver/manifest.json]
 """
 import argparse
 import json

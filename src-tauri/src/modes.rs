@@ -301,7 +301,7 @@ mod tests {
     #[test]
     #[ignore]
     fn reads_the_disc_modes() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../original/fst/files/locale/fr_EU");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../original/fst/files/locale/fr_EU");
         let thumbnails = std::fs::read(root.join(THUMBNAILS)).unwrap();
         let modes = read(&thumbnails, &std::fs::read(root.join(TEXTS)).unwrap(), Some(&thumbnails)).unwrap();
         assert_eq!(modes.len(), MODES.len());

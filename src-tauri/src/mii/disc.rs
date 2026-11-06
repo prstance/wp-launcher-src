@@ -162,7 +162,7 @@ mod tests {
     #[test]
     #[ignore]
     fn reads_the_disc_resources() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../original");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../original");
         let arc = decompress_lz(&std::fs::read(root.join("fst/files").join(RESOURCES)).unwrap()).unwrap();
         let res = u8_file(&arc, RESOURCES_FILE).unwrap();
         assert_eq!(res, std::fs::read(root.join("unpacked/RFL/Resource/RFLRes01.arc.d/RFL_Res.dat")).unwrap());

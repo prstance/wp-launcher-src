@@ -124,8 +124,8 @@ mod tests {
     use super::*;
 
     /// Extracted from the disc, next to the launcher in the mod project.
-    const RES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../original/unpacked/RFL/Resource/RFLRes01.arc.d/RFL_Res.dat");
-    const RSD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../original/unpacked/RFL/RSD/mii_rsd.bin");
+    const RES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../original/unpacked/RFL/Resource/RFLRes01.arc.d/RFL_Res.dat");
+    const RSD: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../original/unpacked/RFL/RSD/mii_rsd.bin");
 
     /// Where the sheets go: $MII_OUT, or the system's temporary folder.
     fn out() -> String {

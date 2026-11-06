@@ -397,7 +397,7 @@ Ancienne recette, sans le système de mods compatibles, depuis wp-winter (branch
 
 1. Dans wp-winter, `WINTER_DEBUG` à 0 (`include/wp/mr001/winter.h`), puis `ninja` (tout, pas seulement
    les RELs modifiés : le mode ajoute du code à `main.dol`, donc chaque REL doit être relié au nouveau).
-2. `python3 scripts/winter-settings.py ../wp-winter/build/SUPP01` (ici) : l'adresse des réglages du mode
+2. `python3 scripts/winter-settings.py ../../mods/wp-winter/build/SUPP01` (ici) : l'adresse des réglages du mode
    (`gWinterSettings`, dans `main.dol`) change à chaque build ; le script la reporte dans
    `themes/mode-hiver/manifest.json` et vérifie que `main.dol` y a bien les valeurs par défaut.
 3. `python3 tools/make_riivolution.py --no-build`. Son paquet ne met pas `main.dol` ni les RELs que le
@@ -409,7 +409,7 @@ Ancienne recette, sans le système de mods compatibles, depuis wp-winter (branch
 ```sh
 python3 scripts/make-wpmod.py dist/WinterMode --id prstance.mode-hiver --name "Mode Hiver" \
     --version 2026.11.12 --game SUPP01 --author prstance --conflicts prstance.mode-duo='*' \
-    --conflicts prstance.mode-lave='*' --extra ../wp-winter/mods/winter/CREDITS.md \
+    --conflicts prstance.mode-lave='*' --extra ../../mods/wp-winter/mods/winter/CREDITS.md \
     --theme themes/mode-hiver --disc "chemin/Wii Party (Europe).rvz" \
     --out src-tauri/versions/Mode-Hiver-2026.11.12.wpver
 ```
