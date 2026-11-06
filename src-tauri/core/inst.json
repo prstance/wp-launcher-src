@@ -1,0 +1,30 @@
+{
+ "module_id": 106,
+ "num_sections": 17,
+ "name_offset": 6520,
+ "name_size": 60,
+ "version": 3,
+ "align": 32,
+ "bss_align": 32,
+ "exec": [
+  false,
+  true,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false
+ ],
+ "hooks": [],
+ "save_bytes": 0
+}

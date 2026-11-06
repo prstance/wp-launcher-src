@@ -1,0 +1,469 @@
+{
+ "module_id": 4,
+ "num_sections": 17,
+ "name_offset": 186,
+ "name_size": 62,
+ "version": 3,
+ "align": 32,
+ "bss_align": 32,
+ "exec": [
+  false,
+  true,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false,
+  false
+ ],
+ "hooks": [
+  {
+   "name": "Board_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but d'une partie (nouvelle ou reprise)"
+  },
+  {
+   "name": "Board_store",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "sauvegarde du plateau"
+  },
+  {
+   "name": "Board_roundEnd",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "fin de manche"
+  },
+  {
+   "name": "Island_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin du plateau (lib\u00e9rer ce que le mod a cr\u00e9\u00e9)"
+  },
+  {
+   "name": "Island_setupBoard",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "plateau mis en place"
+  },
+  {
+   "name": "Island_intro",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pr\u00e9sentation de d\u00e9but de partie, avant le message de bienvenue"
+  },
+  {
+   "name": "IslandMap_setEruptionVisuals",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "aspect de l'\u00e9ruption du volcan (ciel, fum\u00e9e, cases)"
+  },
+  {
+   "name": "IslandMap_eruptionEnded",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "fin d'une \u00e9ruption (le ciel d'\u00e9ruption dispara\u00eet)"
+  },
+  {
+   "name": "IslandMap_setCaveView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "passage \u00e0 la vue de la grotte (mode 1) ou du plateau (0)"
+  },
+  {
+   "name": "IslandMap_eruptionLook",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "effets de fum\u00e9e et de cendres de l'\u00e9ruption"
+  },
+  {
+   "name": "Volcano_exitSpace",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "case de sortie du volcan"
+  },
+  {
+   "name": "Board_roundResults",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "ordre de jeu lu des r\u00e9sultats du mini-jeu de fin de manche"
+  },
+  {
+   "name": "Island_playersPlaced",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueurs replac\u00e9s sur leurs cases, tour en cours choisi"
+  },
+  {
+   "name": "Island_turnPrepared",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but d'un tour pr\u00e9par\u00e9 (joueurs remis en place)"
+  },
+  {
+   "name": "Island_rulesPages",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pages des r\u00e8gles de d\u00e9but de partie"
+  },
+  {
+   "name": "Board_targetAllowed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "un joueur peut-il \u00eatre vis\u00e9 (duel, tornade, OVNI)"
+  },
+  {
+   "name": "SpaceUfo_target",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur \u00e9chang\u00e9 par l'OVNI, choisi par le mod"
+  },
+  {
+   "name": "Board_spaceMinigame",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mode du mini-jeu de la case d'un joueur"
+  },
+  {
+   "name": "Minigame_select",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mode et \u00e9quipes d'un mini-jeu"
+  },
+  {
+   "name": "Board_isWinner",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "un joueur a-t-il gagn\u00e9 la partie"
+  },
+  {
+   "name": "Board_finalRanks",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "classement final"
+  },
+  {
+   "name": "Island_mapCreated",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "\u00e9v\u00e9nements des cases cr\u00e9\u00e9s"
+  },
+  {
+   "name": "SpaceManager_built",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cases du plateau cr\u00e9\u00e9es"
+  },
+  {
+   "name": "SpaceManager_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin des cases du plateau"
+  },
+  {
+   "name": "MapView_spaceGuide",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "guide d'une case dans la vue de la carte"
+  },
+  {
+   "name": "Player_color",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleur d'un joueur (maillot, panneaux, mini-carte)"
+  },
+  {
+   "name": "Island_panelValue",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rang et nombre (cases restantes) du panneau d'un joueur"
+  },
+  {
+   "name": "ScorePanel_digits",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chiffres du panneau \u00ab Reste : \u00bb et valeur maximale"
+  },
+  {
+   "name": "ScorePanel_colored",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleurs du panneau \u00ab Reste : \u00bb d'un joueur"
+  },
+  {
+   "name": "PlayerName_slot",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "place d'un joueur dans l'\u00e9cran des noms"
+  },
+  {
+   "name": "Island_createMap",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cr\u00e9ation de la carte du plateau (avant / apr\u00e8s)"
+  },
+  {
+   "name": "Island_calc",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image du plateau"
+  },
+  {
+   "name": "Island_finalRanking",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fond du classement final cr\u00e9\u00e9"
+  },
+  {
+   "name": "Island_turnStart",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but du tour d'un joueur (apr\u00e8s le bandeau \u00ab tour \u00bb)"
+  },
+  {
+   "name": "Island_cameraPitch",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "inclinaison de la cam\u00e9ra du plateau"
+  },
+  {
+   "name": "Island_steppingStone",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "le d\u00e9fi des caisses / tonneaux (SteppingStone)"
+  },
+  {
+   "name": "Island_challengeActions",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "actions des d\u00e9fis cr\u00e9\u00e9es"
+  },
+  {
+   "name": "IslandMap_caveJoint",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "points d'accroche du mod\u00e8le de la grotte"
+  },
+  {
+   "name": "IslandMap_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "carte du plateau cr\u00e9\u00e9e"
+  },
+  {
+   "name": "IslandMap_caveViewSet",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "vue de la grotte / du plateau mise en place (fin)"
+  },
+  {
+   "name": "IslandMap_areaVisible",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "zones du plateau montr\u00e9es / cach\u00e9es"
+  },
+  {
+   "name": "SpacePlusMinus_goal",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "saut d'une case plus jusqu'\u00e0 la sortie de la grotte"
+  },
+  {
+   "name": "SpacePlusMinus_landed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "saut d'une case plus / moins termin\u00e9"
+  },
+  {
+   "name": "DragonWall_need",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "r\u00e9sultat qu'il faut au mur du dragon"
+  },
+  {
+   "name": "DragonWall_failed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "lancer rat\u00e9 au mur du dragon"
+  },
+  {
+   "name": "DragonWall_burned",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueur repouss\u00e9 par le souffle du dragon"
+  },
+  {
+   "name": "SpikeBall_swept",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueurs emport\u00e9s par la boule \u00e0 pics"
+  },
+  {
+   "name": "CaveGoal_enter",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "arriv\u00e9e \u00e0 la sortie de la grotte"
+  },
+  {
+   "name": "CaveGoal_exit",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "sortie de la grotte, sur la case de retour"
+  },
+  {
+   "name": "CaveGoal_walkOn",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "reprise de la marche apr\u00e8s la sortie de la grotte"
+  },
+  {
+   "name": "Tornado_shown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "colonne de la tornade apparue / disparue"
+  },
+  {
+   "name": "Tarzan_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane cr\u00e9\u00e9e"
+  },
+  {
+   "name": "Tarzan_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane d\u00e9truite"
+  },
+  {
+   "name": "Tarzan_init",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane remise en place"
+  },
+  {
+   "name": "Tarzan_action",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "le passage de la liane"
+  },
+  {
+   "name": "Tarzan_caveView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane : vue de la grotte"
+  },
+  {
+   "name": "Tarzan_mapView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane : vue de la carte"
+  },
+  {
+   "name": "CliffEdge_failed",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "chute rat\u00e9e au bord de la falaise"
+  },
+  {
+   "name": "LavaRock_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rochers flottants de la grotte cr\u00e9\u00e9s"
+  },
+  {
+   "name": "LavaRock_landed",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur pos\u00e9 sur un rocher flottant"
+  },
+  {
+   "name": "LavaRock_partShown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rocher flottant montr\u00e9 dans la grotte"
+  },
+  {
+   "name": "LavaRock_bob",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "flottement des rochers"
+  },
+  {
+   "name": "Dice_doublesKind",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9 du lancer suppl\u00e9mentaire des doubles"
+  },
+  {
+   "name": "Dice_create",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cr\u00e9ation d'un d\u00e9"
+  },
+  {
+   "name": "Player_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueur cr\u00e9\u00e9 (ses mouvements charg\u00e9s)"
+  },
+  {
+   "name": "Player_moveDice",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s du lancer de d\u00e9placement"
+  },
+  {
+   "name": "Player_moveRolled",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "lancer de d\u00e9placement termin\u00e9"
+  },
+  {
+   "name": "Player_stopped",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur arr\u00eat\u00e9 sur une case"
+  },
+  {
+   "name": "Player_fork",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "embranchement : chemin choisi par le mod"
+  },
+  {
+   "name": "Player_step",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pas vers la case suivante"
+  },
+  {
+   "name": "Minigame_pool",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mini-jeux du tirage"
+  },
+  {
+   "name": "Minigame_pick",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "tirage d'un mini-jeu"
+  },
+  {
+   "name": "MiiCharacter_body",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mod\u00e8le du corps d'un personnage"
+  }
+ ],
+ "save_bytes": 17
+}
