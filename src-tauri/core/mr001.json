@@ -27,6 +27,12 @@
  ],
  "hooks": [
   {
+   "name": "Camera_pose",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pose de la cam\u00e9ra du plateau pour cette image, avant son emploi"
+  },
+  {
    "name": "Board_start",
    "kind": "void",
    "exclusive": false,
@@ -121,6 +127,12 @@
    "kind": "void",
    "exclusive": false,
    "doc": "un joueur peut-il \u00eatre vis\u00e9 (duel, tornade, OVNI)"
+  },
+  {
+   "name": "Board_noTarget",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "tornade ou OVNI sans personne \u00e0 viser"
   },
   {
    "name": "SpaceUfo_target",
@@ -225,6 +237,12 @@
    "doc": "fond du classement final cr\u00e9\u00e9"
   },
   {
+   "name": "Island_turnTelop",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image du bandeau \u00ab tour \u00bb"
+  },
+  {
    "name": "Island_turnStart",
    "kind": "void",
    "exclusive": false,
@@ -282,7 +300,7 @@
    "name": "SpacePlusMinus_landed",
    "kind": "void",
    "exclusive": false,
-   "doc": "saut d'une case plus / moins termin\u00e9"
+   "doc": "saut d'une case plus termin\u00e9 (pas au recul)"
   },
   {
    "name": "DragonWall_need",
@@ -411,6 +429,30 @@
    "doc": "cr\u00e9ation d'un d\u00e9"
   },
   {
+   "name": "Dice_rollWait",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s en attente du lancer d'un joueur humain"
+  },
+  {
+   "name": "Dice_rollThrown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s lanc\u00e9s par un joueur humain"
+  },
+  {
+   "name": "Dice_face",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "face sur laquelle un d\u00e9 tombe"
+  },
+  {
+   "name": "Player_freeWalk",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "marche libre du drapeau de d\u00e9veloppement"
+  },
+  {
    "name": "Player_created",
    "kind": "void",
    "exclusive": false,
@@ -457,6 +499,12 @@
    "kind": "bool",
    "exclusive": false,
    "doc": "tirage d'un mini-jeu"
+  },
+  {
+   "name": "Minigame_skip",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "mini-jeu saut\u00e9"
   },
   {
    "name": "MiiCharacter_body",

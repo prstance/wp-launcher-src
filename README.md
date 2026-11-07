@@ -180,7 +180,7 @@ La version active les change de deux façons :
 - avec `modes` dans son thème (voir Versions), pour des images faites pour le launcher, montrées en
   premier (ou seules, avec `modesOnly`). Mode Hiver ne montre que dix plans de ses parties
   (`themes/mode-hiver/mode-*.png`) : Île hivernale, 9 nouveaux mini-jeux, cases avalanche, grotte de glace, yéti, boule de neige géante, mur de glace, dé de
-  glace, ponts de glace, Sanctuaire du glacier.
+  glace, la glace craque, Sanctuaire du glacier.
 
 ## Mods
 
@@ -389,7 +389,7 @@ remplacés seulement si le launcher en apporte une version plus récente. Ils ne
 Une nouvelle installation démarre sur `prstance.mode-hiver`.
 
 Une version a les mêmes patchs qu'un mod, `code` compris : elle se lie aux mods activés et reste compatible avec eux.
-Mode Hiver (`prstance.mode-hiver` 2026.12.0) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
+Mode Hiver (`prstance.mode-hiver` 2026.12.1) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
 en fait un `.wpver` (`"package": "version"` dans son `wpmod.json`), à copier dans `src-tauri/versions/`. Un `.wpver`
 fourni doit être versionné (la CI de release l'embarque).
 
