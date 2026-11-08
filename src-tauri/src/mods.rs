@@ -999,11 +999,33 @@ fn code_mod(m: &Installed) -> link::CodeMod<'_> {
     link::CodeMod { id: &m.manifest.id, dir: &m.dir, modules, writes, messages: m.manifest.messages.clone(), messages_with: m.manifest.messages_with.clone(), minigames: m.manifest.minigames.clone() }
 }
 
+// src-tauri/core's files, built into the binary (build.rs).
+#[cfg_attr(debug_assertions, allow(dead_code))]
+mod core_files {
+    include!(concat!(env!("OUT_DIR"), "/core_files.rs"));
+}
+
 /// The mods' core (wp-core tools/wpcore_pack.py: the game's code the mods link with), shipped with the launcher.
 pub fn core_dir(app: &AppHandle) -> Option<PathBuf> {
     // During development it is used straight from src-tauri/core.
-    let dir = if cfg!(debug_assertions) { Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core")) } else { app.path().resource_dir().ok().map(|d| d.join("core")) }?;
-    dir.join("main.sym").is_file().then_some(dir)
+    if cfg!(debug_assertions) {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core");
+        return dir.join("main.sym").is_file().then_some(dir);
+    }
+    // A release carries it in its binary (not as resources: build.rs) and writes it out once per run,
+    // in its data folder, where it differs.
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = data_dir(app, "core").ok()?;
+        for (name, bytes) in core_files::CORE_FILES {
+            let path = dir.join(name);
+            if std::fs::read(&path).map_or(true, |old| old != *bytes) {
+                std::fs::write(&path, bytes).ok()?;
+            }
+        }
+        dir.join("main.sym").is_file().then_some(dir)
+    })
+    .clone()
 }
 
 /// check, and whether the mods' code links together (`core`: core_dir).
