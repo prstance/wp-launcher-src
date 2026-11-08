@@ -60,6 +60,8 @@ jobs:
           owner: prstance
           repo: wp-launcher
           tagName: v__VERSION__
+          # (the tag goes on the public repository's main: this repository's commits aren't there)
+          releaseCommitish: main
           releaseName: PartyLauncher __VERSION__
           releaseBody: Télécharge l’installateur de ton système ci-dessous. Il te faut ton propre disque de Wii Party (PAL, SUPP01).
           releaseDraft: false
