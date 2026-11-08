@@ -441,6 +441,47 @@
     "addend": 0,
     "original": "38A5D0E0"
    }
-  ]
+  ],
+  "reuse": {
+   "address": "0x801DD0E0",
+   "size": 2816
+  },
+  "extra": {
+   "object": "minigames.o",
+   "room": 93,
+   "table": "wpMinigameTable",
+   "count": "wpMinigameCount",
+   "replace": [
+    {
+     "at": "isMinigameUnlocked__8GameDataFi",
+     "expect": "3C80801E",
+     "call": "wpIsMinigameUnlocked",
+     "original": "wpIsMinigameUnlockedOriginal"
+    },
+    {
+     "at": "unlockMinigame__8GameDataFii",
+     "expect": "3C80801E",
+     "call": "wpUnlockMinigame",
+     "original": "wpUnlockMinigameOriginal"
+    },
+    {
+     "at": "isMinigameGroupComplete__8GameDataFi",
+     "expect": "3CC0801E",
+     "call": "wpIsMinigameGroupComplete"
+    },
+    {
+     "at": "addMinigamePlayCount__8GameDataFi",
+     "expect": "9421FFE0",
+     "call": "wpAddMinigamePlayCount",
+     "original": "wpAddMinigamePlayCountOriginal"
+    },
+    {
+     "at": "getMinigamePlayCount__8GameDataFi",
+     "expect": "2C030000",
+     "call": "wpGetMinigamePlayCount",
+     "original": "wpGetMinigamePlayCountOriginal"
+    }
+   ]
+  }
  }
 }

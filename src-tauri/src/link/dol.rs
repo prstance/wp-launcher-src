@@ -2,7 +2,9 @@
 //! and reached by injections. An injected instruction becomes a `b` to a trampoline that saves every register
 //! into a `WpContext` (wp/mod/context.h), calls the handlers with it (they may read and change the registers,
 //! or set `resume` to continue elsewhere), restores, runs the instruction and comes back. Several mods at the
-//! same place share the trampoline. Everything becomes Riivolution memory patches.
+//! same place share the trampoline. A replaced function's first instruction becomes a `b` to its replacement.
+//! Once main.dol's minigame table is moved (minigames.rs), its original place takes what does not fit in the
+//! low memory. Everything becomes Riivolution memory patches.
 
 use super::elf::{self, Object, Symbol};
 use super::rel::MainSymbols;
@@ -24,12 +26,32 @@ pub struct Inject {
     pub after: bool,
 }
 
+/// One function replaced: its first instruction, which must be `expect`, becomes a `b` to `handler`.
+/// `original`, when set, is a function the launcher makes that runs the replaced one: `run` (its first
+/// instruction, `expect` or what another patch puts there), then the rest in place.
+#[derive(Clone)]
+pub struct Replace {
+    pub symbol: String,
+    pub expect: u32,
+    pub run: u32,
+    pub handler: String,
+    pub original: Option<String>,
+}
+
 #[derive(Clone, Default)]
 pub struct DolPart {
     pub id: String,
     pub objects: Vec<Object>,
     pub injects: Vec<Inject>,
+    pub replaces: Vec<Replace>,
     pub writes: Vec<(String, u32, Vec<u8>)>,
+}
+
+/// Memory of main.dol that the mods' code may take after the low memory: the original place of the
+/// minigame table once the launcher moved it, with its bytes (Riivolution's `original`).
+pub struct Spare {
+    pub address: u32,
+    pub original: Vec<u8>,
 }
 
 /// A memory patch: `original`, when set, must be there (else Riivolution leaves it).
@@ -108,28 +130,180 @@ fn moved(ins: u32, from: u32, to: u32) -> Result<Vec<u32>, String> {
     Ok(vec![ins])
 }
 
-struct Image {
-    /// Absolute address of each object's section: (object index, section index) -> address
-    base: u32,
+/// A free area, filled from its start: its bytes up to `next` become one memory patch.
+struct Region {
+    start: u32,
+    end: u32,
+    next: u32,
     bytes: Vec<u8>,
+    original: Option<Vec<u8>>,
 }
 
-impl Image {
+/// The free areas, in the order they are filled.
+struct Memory {
+    regions: Vec<Region>,
+}
+
+impl Memory {
+    /// `size` bytes aligned to `align` in the first area with room.
+    fn alloc(&mut self, size: u32, align: u32) -> Option<u32> {
+        for r in &mut self.regions {
+            let at = (r.next + align - 1) & !(align - 1);
+            if at + size <= r.end {
+                r.next = at + size;
+                return Some(at);
+            }
+        }
+        None
+    }
+
+    /// Code that `make` writes for its address, in the first area with room.
+    fn alloc_code(&mut self, make: impl Fn(u32) -> Result<Vec<u32>, String>) -> Result<Option<(u32, Vec<u32>)>, String> {
+        for r in &mut self.regions {
+            let at = (r.next + 3) & !3;
+            let code = make(at)?;
+            if at + 4 * code.len() as u32 <= r.end {
+                r.next = at + 4 * code.len() as u32;
+                return Ok(Some((at, code)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn free(&self) -> u32 {
+        self.regions.iter().map(|r| r.end - r.next).sum()
+    }
+
+    /// The bytes at `at` (once the layout is done: `close`).
+    fn bytes(&mut self, at: u32, len: usize) -> &mut [u8] {
+        let r = self.regions.iter_mut().find(|r| r.start <= at && at < r.next).expect("adresse hors de la mémoire des mods");
+        let o = (at - r.start) as usize;
+        &mut r.bytes[o..o + len]
+    }
+
     fn word(&mut self, at: u32, w: u32) {
-        let o = (at - self.base) as usize;
-        self.bytes[o..o + 4].copy_from_slice(&w.to_be_bytes());
+        self.bytes(at, 4).copy_from_slice(&w.to_be_bytes());
+    }
+
+    fn close(&mut self) {
+        for r in &mut self.regions {
+            r.bytes.resize((r.next - r.start) as usize, 0);
+        }
     }
 }
 
-/// Links the mods' main.dol parts after `data` (at BASE: the minigame table, minigames.rs). Returns the
-/// memory patches, the code first. An injected instruction is the mod's `expect` (Riivolution checks it:
-/// `original`), so main.dol itself is not needed.
-pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Patch>, LinkError> {
-    if data.is_empty() && parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty()) {
+/// Assembles code at its address.
+struct Asm {
+    code: Vec<u32>,
+    pc: u32,
+}
+
+impl Asm {
+    fn e(&mut self, w: u32) {
+        self.code.push(w);
+        self.pc += 4;
+    }
+}
+
+/// The trampoline of an injection site at `at` (instruction `original`), for the address `start`.
+fn trampoline(start: u32, at: u32, original: u32, before: &[u32], after: &[u32]) -> Result<Vec<u32>, String> {
+    let mut a = Asm { code: Vec::new(), pc: start };
+    fn save(a: &mut Asm) {
+        a.e(ppc::stwu(1, 1, -FRAME));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_GPR));
+        a.e(ppc::stmw(2, 1, CTX_AT + CTX_GPR + 8));
+        a.e(ppc::addi(0, 1, FRAME));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_GPR + 4));
+        a.e(ppc::mfcr(0));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_CR));
+        a.e(ppc::mfspr(0, ppc::LR));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_LR));
+        a.e(ppc::mfspr(0, ppc::CTR));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_CTR));
+        a.e(ppc::mfspr(0, ppc::XER));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_XER));
+        a.e(ppc::addi(0, 0, 0));
+        a.e(ppc::stw(0, 1, CTX_AT + CTX_RESUME));
+        for f in 0..32 {
+            a.e(ppc::stfd(f, 1, CTX_AT + CTX_FPR + 8 * f as i16));
+        }
+    }
+    // restores everything but CR0..7 and CTR when `resume` (they are needed to leave)
+    fn restore(a: &mut Asm, keep_ctr: bool) {
+        for f in 0..32 {
+            a.e(ppc::lfd(f, 1, CTX_AT + CTX_FPR + 8 * f as i16));
+        }
+        a.e(ppc::lwz(0, 1, CTX_AT + CTX_XER));
+        a.e(ppc::mtspr(ppc::XER, 0));
+        if keep_ctr {
+            a.e(ppc::lwz(0, 1, CTX_AT + CTX_CTR));
+            a.e(ppc::mtspr(ppc::CTR, 0));
+        }
+        a.e(ppc::lwz(0, 1, CTX_AT + CTX_LR));
+        a.e(ppc::mtspr(ppc::LR, 0));
+        a.e(ppc::lwz(0, 1, CTX_AT + CTX_CR));
+        a.e(ppc::mtcr(0));
+        a.e(ppc::lmw(2, 1, CTX_AT + CTX_GPR + 8));
+        a.e(ppc::lwz(0, 1, CTX_AT + CTX_GPR));
+        a.e(ppc::addi(1, 1, FRAME));
+    }
+    fn block(a: &mut Asm, handlers: &[u32]) -> Result<(), String> {
+        if handlers.is_empty() {
+            return Ok(());
+        }
+        save(a);
+        for &target in handlers {
+            a.e(ppc::addi(3, 1, CTX_AT));
+            let w = ppc::b(a.pc, target, true).ok_or("appel trop loin")?;
+            a.e(w);
+        }
+        // resume set: leave through CTR
+        a.e(ppc::lwz(0, 1, CTX_AT + CTX_RESUME));
+        a.e(ppc::cmpwi0(0));
+        let beq_at = a.code.len();
+        a.e(0);
+        a.e(ppc::mtspr(ppc::CTR, 0));
+        restore(a, false);
+        a.e(ppc::BCTR);
+        let d = (a.code.len() - beq_at) as i16 * 4;
+        a.code[beq_at] = ppc::beq(d);
+        restore(a, true);
+        Ok(())
+    }
+    block(&mut a, before)?;
+    for w in moved(original, at, a.pc)? {
+        a.e(w);
+    }
+    block(&mut a, after)?;
+    let back = ppc::b(a.pc, at + 4, false).ok_or("retour trop loin")?;
+    a.e(back);
+    Ok(a.code)
+}
+
+/// Links the mods' main.dol parts after `data` (at BASE: the minigame table, minigames.rs), then in `spare`
+/// what does not fit. Returns the memory patches, the code first. An injected instruction and a replaced
+/// function's first one are given (`expect`, Riivolution checks them: `original`), so main.dol itself is not
+/// needed.
+pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&Spare>) -> Result<Vec<Patch>, LinkError> {
+    if data.is_empty() && parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty() && p.replaces.is_empty()) {
         return Ok(vec![]);
     }
-    // layout: the data, then every allocated section of every object, in order, aligned
-    let mut addr = (BASE + data.len() as u32 + 31) & !31;
+    let all: Vec<&str> = parts.iter().map(|p| p.id.as_str()).collect();
+    if BASE + data.len() as u32 > END {
+        return Err(LinkError::new(format!("la table des mini-jeux dépasse la place libre ({} octets de trop)", BASE + data.len() as u32 - END), &[]));
+    }
+    let mut memory = Memory {
+        regions: vec![Region { start: BASE, end: END, next: (BASE + data.len() as u32 + 31) & !31, bytes: Vec::new(), original: None }],
+    };
+    if let Some(s) = spare {
+        let end = s.address + s.original.len() as u32;
+        memory.regions.push(Region { start: s.address, end, next: s.address, bytes: Vec::new(), original: Some(s.original.clone()) });
+    }
+    let full = |memory: &Memory, size: u32| {
+        LinkError::new(format!("le code des mods pour main.dol dépasse la place libre ({size} octets à placer, {} libres)", memory.free()), &all)
+    };
+
+    // layout: every allocated section of every object, code then data then bss
     let mut placed: HashMap<(usize, usize, usize), u32> = HashMap::new();
     for kind in [0, 1, 2] {
         for (p, part) in parts.iter().enumerate() {
@@ -148,15 +322,12 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
                         }
                         continue;
                     }
-                    let align = sec.align.max(4);
-                    addr = (addr + align - 1) & !(align - 1);
-                    placed.insert((p, o, s), addr);
-                    addr += sec.size;
+                    let at = memory.alloc(sec.size, sec.align.max(4)).ok_or_else(|| full(&memory, sec.size))?;
+                    placed.insert((p, o, s), at);
                 }
             }
         }
     }
-    let code_end = (addr + 3) & !3;
 
     // global symbols of the parts
     let mut globals: HashMap<String, (u32, String)> = HashMap::new();
@@ -182,6 +353,34 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
             }
         }
     }
+
+    // replaced functions: the jumps to the replacements, and the originals the parts call
+    let mut replaced: Vec<(u32, &Replace, &str)> = Vec::new();
+    let mut code: Vec<(u32, Vec<u32>)> = Vec::new();
+    for part in parts {
+        for r in &part.replaces {
+            let fail = |m: String| LinkError::new(m, &[&part.id]);
+            let at = main.get(&r.symbol).ok_or_else(|| fail(format!("« {} » n'est pas dans main.dol", r.symbol)))?.0;
+            if let Some((_, _, other)) = replaced.iter().find(|x| x.0 == at) {
+                return Err(LinkError::new(format!("« {} » est remplacée deux fois", r.symbol), &[other, &part.id]));
+            }
+            if let Some(name) = &r.original {
+                let make = |pc: u32| -> Result<Vec<u32>, String> {
+                    let mut words = moved(r.run, at, pc)?;
+                    let back = pc + 4 * words.len() as u32;
+                    words.push(ppc::b(back, at + 4, false).ok_or("retour trop loin")?);
+                    Ok(words)
+                };
+                let (thunk, words) = memory.alloc_code(make).map_err(fail)?.ok_or_else(|| full(&memory, 8))?;
+                if let Some((_, other)) = globals.get(name) {
+                    return Err(LinkError::new(format!("« {name} » est défini deux fois"), &[other, &part.id]));
+                }
+                globals.insert(name.clone(), (thunk, part.id.clone()));
+                code.push((thunk, words));
+            }
+            replaced.push((at, r, &part.id));
+        }
+    }
     let resolve = |name: &str| globals.get(name).map(|g| g.0).or_else(|| main.get(name).map(|m| m.0));
 
     // trampolines, after the code
@@ -194,6 +393,9 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
             if resolve(&inj.handler).is_none() {
                 return Err(fail(format!("« {} » est introuvable dans le code du mod", inj.handler)));
             }
+            if let Some((_, r, other)) = replaced.iter().find(|x| x.1.symbol == inj.symbol) {
+                return Err(LinkError::new(format!("« {} » est remplacée : plus d'injection possible dedans", r.symbol), &[other, &part.id]));
+            }
             match sites.iter_mut().find(|s| s.0 == at) {
                 Some(site) if site.1 != found => {
                     return Err(LinkError::new(format!("{}+{:#X} : deux instructions d'origine différentes attendues", inj.symbol, inj.offset), &[&part.id]));
@@ -203,109 +405,36 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
             }
         }
     }
-    let mut code: Vec<u32> = Vec::new();
     let mut site_patches = Vec::new();
-    let mut pc = code_end;
-    let emit = |code: &mut Vec<u32>, pc: &mut u32, w: u32| {
-        code.push(w);
-        *pc += 4;
-    };
     for (at, original, injs) in &sites {
-        let start = pc;
-        let save = |code: &mut Vec<u32>, pc: &mut u32| {
-            let mut e = |w| emit(code, pc, w);
-            e(ppc::stwu(1, 1, -FRAME));
-            e(ppc::stw(0, 1, CTX_AT + CTX_GPR));
-            e(ppc::stmw(2, 1, CTX_AT + CTX_GPR + 8));
-            e(ppc::addi(0, 1, FRAME));
-            e(ppc::stw(0, 1, CTX_AT + CTX_GPR + 4));
-            e(ppc::mfcr(0));
-            e(ppc::stw(0, 1, CTX_AT + CTX_CR));
-            e(ppc::mfspr(0, ppc::LR));
-            e(ppc::stw(0, 1, CTX_AT + CTX_LR));
-            e(ppc::mfspr(0, ppc::CTR));
-            e(ppc::stw(0, 1, CTX_AT + CTX_CTR));
-            e(ppc::mfspr(0, ppc::XER));
-            e(ppc::stw(0, 1, CTX_AT + CTX_XER));
-            e(ppc::addi(0, 0, 0));
-            e(ppc::stw(0, 1, CTX_AT + CTX_RESUME));
-            for f in 0..32 {
-                e(ppc::stfd(f, 1, CTX_AT + CTX_FPR + 8 * f as i16));
-            }
-        };
-        // restores everything but CR0..7 and CTR when `resume` (they are needed to leave)
-        let restore = |code: &mut Vec<u32>, pc: &mut u32, keep_ctr: bool| {
-            let mut e = |w| emit(code, pc, w);
-            for f in 0..32 {
-                e(ppc::lfd(f, 1, CTX_AT + CTX_FPR + 8 * f as i16));
-            }
-            e(ppc::lwz(0, 1, CTX_AT + CTX_XER));
-            e(ppc::mtspr(ppc::XER, 0));
-            if keep_ctr {
-                e(ppc::lwz(0, 1, CTX_AT + CTX_CTR));
-                e(ppc::mtspr(ppc::CTR, 0));
-            }
-            e(ppc::lwz(0, 1, CTX_AT + CTX_LR));
-            e(ppc::mtspr(ppc::LR, 0));
-            e(ppc::lwz(0, 1, CTX_AT + CTX_CR));
-            e(ppc::mtcr(0));
-            e(ppc::lmw(2, 1, CTX_AT + CTX_GPR + 8));
-            e(ppc::lwz(0, 1, CTX_AT + CTX_GPR));
-            e(ppc::addi(1, 1, FRAME));
-        };
-        let block = |code: &mut Vec<u32>, pc: &mut u32, handlers: &[&str]| -> Result<(), String> {
-            if handlers.is_empty() {
-                return Ok(());
-            }
-            save(code, pc);
-            for h in handlers {
-                emit(code, pc, ppc::addi(3, 1, CTX_AT));
-                let target = resolve(h).unwrap();
-                let w = ppc::b(*pc, target, true).ok_or("appel trop loin")?;
-                emit(code, pc, w);
-            }
-            // resume set: leave through CTR
-            emit(code, pc, ppc::lwz(0, 1, CTX_AT + CTX_RESUME));
-            emit(code, pc, ppc::cmpwi0(0));
-            let beq_at = code.len();
-            emit(code, pc, 0);
-            emit(code, pc, ppc::mtspr(ppc::CTR, 0));
-            restore(code, pc, false);
-            emit(code, pc, ppc::BCTR);
-            let d = (code.len() - beq_at) as i16 * 4;
-            code[beq_at] = ppc::beq(d);
-            restore(code, pc, true);
-            Ok(())
-        };
-        let before: Vec<&str> = injs.iter().filter(|(i, _)| !i.after).map(|(i, _)| i.handler.as_str()).collect();
-        let after: Vec<&str> = injs.iter().filter(|(i, _)| i.after).map(|(i, _)| i.handler.as_str()).collect();
+        let before: Vec<u32> = injs.iter().filter(|(i, _)| !i.after).map(|(i, _)| resolve(&i.handler).unwrap()).collect();
+        let after: Vec<u32> = injs.iter().filter(|(i, _)| i.after).map(|(i, _)| resolve(&i.handler).unwrap()).collect();
         let ids: Vec<&str> = injs.iter().map(|(_, id)| *id).collect();
         let fail = |m: String| LinkError::new(m, &ids);
-        block(&mut code, &mut pc, &before).map_err(fail)?;
-        for w in moved(*original, *at, pc).map_err(fail)? {
-            emit(&mut code, &mut pc, w);
-        }
-        block(&mut code, &mut pc, &after).map_err(fail)?;
-        let back = ppc::b(pc, at + 4, false).ok_or_else(|| fail("retour trop loin".into()))?;
-        emit(&mut code, &mut pc, back);
+        let make = |pc: u32| trampoline(pc, *at, *original, &before, &after);
+        let (start, words) = memory.alloc_code(make).map_err(fail)?.ok_or_else(|| full(&memory, 4 * trampoline(*at, *at, *original, &before, &after).map_or(0, |w| w.len() as u32)))?;
+        code.push((start, words));
         let jump = ppc::b(*at, start, false).ok_or_else(|| fail("tremplin trop loin".into()))?;
         site_patches.push(Patch { address: *at, value: jump.to_be_bytes().to_vec(), original: Some(original.to_be_bytes().to_vec()) });
     }
-    if pc > END {
-        let ids: Vec<&str> = parts.iter().map(|p| p.id.as_str()).collect();
-        return Err(LinkError::new(format!("le code des mods pour main.dol dépasse la place libre ({} octets de trop)", pc - END), &ids));
+    for (at, r, id) in &replaced {
+        let fail = |m: String| LinkError::new(m, &[id]);
+        let target = resolve(&r.handler).ok_or_else(|| fail(format!("« {} » est introuvable dans le code du mod", r.handler)))?;
+        let jump = ppc::b(*at, target, false).ok_or_else(|| fail("remplacement trop loin".into()))?;
+        site_patches.push(Patch { address: *at, value: jump.to_be_bytes().to_vec(), original: Some(r.expect.to_be_bytes().to_vec()) });
     }
 
-    // the image: the data, the sections, relocations, then the trampolines
-    let mut image = Image { base: BASE, bytes: vec![0; (pc - BASE) as usize] };
-    image.bytes[..data.len()].copy_from_slice(data);
+    // the bytes: the data, the sections, relocations, then the trampolines
+    memory.close();
+    if !data.is_empty() {
+        memory.bytes(BASE, data.len()).copy_from_slice(data);
+    }
     for (p, part) in parts.iter().enumerate() {
         for (o, obj) in part.objects.iter().enumerate() {
             for (s, sec) in obj.sections.iter().enumerate() {
                 let Some(&at) = placed.get(&(p, o, s)) else { continue };
                 if sec.kind != elf::SHT_NOBITS {
-                    let off = (at - BASE) as usize;
-                    image.bytes[off..off + sec.data.len()].copy_from_slice(&sec.data);
+                    memory.bytes(at, sec.data.len()).copy_from_slice(&sec.data);
                 }
                 for r in &sec.relocs {
                     let sym = &obj.symbols[r.symbol];
@@ -314,10 +443,9 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
                         .ok_or_else(|| fail(format!("symbole introuvable : {}", sym.name)))?;
                     let value = target.wrapping_add(r.addend as u32);
                     let place = at + r.offset;
-                    let o = (place - BASE) as usize;
                     // the 16-bit relocations point at the field itself (the instruction + 2)
                     let old = if matches!(r.kind, elf::R_PPC_REL24 | elf::R_PPC_REL14 | elf::R_PPC_ADDR32) {
-                        u32::from_be_bytes(image.bytes[o..o + 4].try_into().unwrap())
+                        u32::from_be_bytes(memory.bytes(place, 4).try_into().unwrap())
                     } else {
                         0
                     };
@@ -343,23 +471,30 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8]) -> Result<Vec<Pa
                         }
                         k => return Err(fail(format!("type de relocation {k} non pris en charge (compiler avec -sdata 0 -sdata2 0)"))),
                     };
-                    image.bytes[o..o + new.len()].copy_from_slice(&new);
+                    memory.bytes(place, new.len()).copy_from_slice(&new);
                 }
             }
         }
     }
-    for (k, w) in code.iter().enumerate() {
-        image.word(code_end + 4 * k as u32, *w);
+    for (start, words) in &code {
+        for (k, w) in words.iter().enumerate() {
+            memory.word(start + 4 * k as u32, *w);
+        }
     }
     for part in parts {
         for (name, offset, bytes) in &part.writes {
             let fail = |m: String| LinkError::new(m, &[&part.id]);
             let at = globals.get(name).filter(|g| g.1 == part.id).ok_or_else(|| fail(format!("« {name} » est introuvable dans le code du mod")))?.0 + offset;
-            let o = (at - BASE) as usize;
-            image.bytes[o..o + bytes.len()].copy_from_slice(bytes);
+            memory.bytes(at, bytes.len()).copy_from_slice(bytes);
         }
     }
-    let mut patches = vec![Patch { address: BASE, value: image.bytes, original: None }];
+    let mut patches = Vec::new();
+    for r in memory.regions {
+        if r.next > r.start || r.start == BASE {
+            let original = r.original.map(|o| o[..r.bytes.len()].to_vec());
+            patches.push(Patch { address: r.start, value: r.bytes, original });
+        }
+    }
     patches.extend(site_patches);
     Ok(patches)
 }
@@ -370,5 +505,62 @@ pub mod tests_ppc {
     pub fn all() -> Vec<u32> {
         vec![stwu(1, 1, -0x1B0), stw(0, 1, 8), stmw(2, 1, 0x10), mfspr(0, LR), mtspr(LR, 0), mfcr(0), mtcr(0), mfspr(0, CTR), mtspr(CTR, 0),
              mfspr(0, XER), mtspr(XER, 0), stfd(0, 1, 0x98), lfd(0, 1, 0x98), addi(0, 0, 0), cmpwi0(0), beq(0x10), lmw(2, 1, 0x10), lwz(0, 1, 8)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn b_at(at: u32, w: u32) -> u32 {
+        let d = (w & 0x03FF_FFFC) as i32;
+        at.wrapping_add(if d & 0x0200_0000 != 0 { d - 0x0400_0000 } else { d } as u32)
+    }
+
+    #[test]
+    fn replaces_and_spills_into_the_spare_place() {
+        let main = MainSymbols::parse("8000A3C0 1 f\n").unwrap();
+        // the low memory keeps 0x100 bytes: the handler takes them, the original's code goes to the spare place
+        let data = vec![0xAA; 0x1700];
+        let part = DolPart {
+            id: "cœur".into(),
+            objects: vec![super::super::module::data_object("handler", vec![0; 0x100])],
+            replaces: vec![Replace { symbol: "f".into(), expect: 0x3C80_801E, run: 0x3C80_8000, handler: "handler".into(), original: Some("f_orig".into()) }],
+            writes: vec![("handler".into(), 0, vec![1, 2, 3, 4])],
+            ..Default::default()
+        };
+        let spare = Spare { address: 0x801D_D0E0, original: vec![0x55; 0x40] };
+        let p = link(&[part], &main, &data, Some(&spare)).unwrap();
+        assert_eq!(p.len(), 3);
+        assert_eq!((p[0].address, p[0].value.len()), (BASE, 0x1800));
+        assert_eq!(&p[0].value[0x1700..0x1704], &[1, 2, 3, 4]);
+        let thunk: Vec<u32> = p[1].value.chunks(4).map(|w| u32::from_be_bytes(w.try_into().unwrap())).collect();
+        assert_eq!((p[1].address, thunk.len(), p[1].original.as_deref()), (0x801D_D0E0, 2, Some(&[0x55u8; 8][..])));
+        assert_eq!(thunk[0], 0x3C80_8000);
+        assert_eq!(b_at(0x801D_D0E4, thunk[1]), 0x8000_A3C4);
+        let jump = u32::from_be_bytes(p[2].value[..].try_into().unwrap());
+        assert_eq!((p[2].address, b_at(0x8000_A3C0, jump)), (0x8000_A3C0, BASE + 0x1700));
+        assert_eq!(p[2].original.as_deref(), Some(&[0x3C, 0x80, 0x80, 0x1E][..]));
+        // no room left anywhere
+        let small = Spare { address: 0x801D_D0E0, original: vec![0x55; 4] };
+        let part = DolPart { replaces: vec![Replace { original: Some("f_orig".into()), ..replace_f() }], ..core_part() };
+        assert!(link(&[part], &main, &data, Some(&small)).is_err());
+    }
+
+    fn replace_f() -> Replace {
+        Replace { symbol: "f".into(), expect: 0x3C80_801E, run: 0x3C80_801E, handler: "handler".into(), original: None }
+    }
+
+    fn core_part() -> DolPart {
+        DolPart { id: "cœur".into(), objects: vec![super::super::module::data_object("handler", vec![0; 0x100])], ..Default::default() }
+    }
+
+    #[test]
+    fn refuses_two_replacements_of_a_function() {
+        let main = MainSymbols::parse("8000A3C0 1 f\n").unwrap();
+        let a = DolPart { replaces: vec![replace_f()], ..core_part() };
+        let b = DolPart { id: "autre".into(), objects: vec![], replaces: vec![replace_f()], ..Default::default() };
+        let e = link(&[a, b], &main, &[], None).err().unwrap();
+        assert_eq!(e.mods, ["cœur", "autre"]);
     }
 }

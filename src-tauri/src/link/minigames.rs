@@ -2,8 +2,11 @@
 //! cannot grow where it is: a copy, the mods' minigames after the original ones, goes at the start of the
 //! mods' memory (dol.rs) and main.dol is patched where it uses the table (wp-core tools/wpcore_registry.py
 //! found those places: main.json). The index of a minigame in the table is its slot in the save's
-//! per-minigame arrays, which have room for a few more only (`max`). The core's modules that list
-//! minigames themselves (the rules screens, Free Play's lists) get `wpMinigames` (wp/mod/minigames.h).
+//! per-minigame arrays, which have room for a few more only (`max`). Past them, the core's main.dol code
+//! (`extra`: wp-core src/wp/mod/MinigameSave.cpp) keeps them in another part of the save, and the table's
+//! original place (`reuse`) takes the mods' main.dol code that does not fit in the low memory (dol.rs). The
+//! core's modules that list minigames themselves (the rules screens, Free Play's lists) get `wpMinigames`
+//! (wp/mod/minigames.h).
 
 use super::LinkError;
 use serde::Deserialize;
@@ -26,9 +29,14 @@ pub struct Spec {
     /// The rules page: layout/inst/mg<rules>.arc (default: its id).
     #[serde(default)]
     pub rules: Option<i32>,
-    /// The controls page: layout/inst/cont<controls>.arc (an original one), none if left out.
+    /// The controls page: layout/inst/cont<controls>.arc (an original one), none if left out; a
+    /// 1v3 minigame's: the solo player's.
     #[serde(default)]
     pub controls: Option<i32>,
+    /// A 1v3 minigame: the team's controls page (cont<controls_team>.arc), none if left out. Its
+    /// rules page has both sides' layouts: inst<rules>_1 (the solo player) and inst<rules>_3 (the team).
+    #[serde(default)]
+    pub controls_team: Option<i32>,
     /// In Free Play's lists.
     #[serde(default = "yes")]
     pub free_play: bool,
@@ -49,6 +57,39 @@ pub struct Registry {
     pub unroll: u32,
     pub entries: String,
     pub sites: Vec<Site>,
+    /// The table's original place, free once the table is moved (none: an older core).
+    #[serde(default)]
+    pub reuse: Option<Reuse>,
+    /// What keeps the minigames past `max` (none: an older core, `max` is the limit).
+    #[serde(default)]
+    pub extra: Option<Extra>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Reuse {
+    pub address: String,
+    pub size: u32,
+}
+
+/// The core's main.dol code for the minigames past `max`: its object (in the core's folder), how many more
+/// it keeps, the symbols the launcher writes (the table's address, its number of entries) and the functions
+/// it replaces.
+#[derive(Deserialize, Clone, Debug)]
+pub struct Extra {
+    pub object: String,
+    pub room: u32,
+    pub table: String,
+    pub count: String,
+    pub replace: Vec<ExtraReplace>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct ExtraReplace {
+    pub at: String,
+    pub expect: String,
+    pub call: String,
+    #[serde(default)]
+    pub original: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -91,6 +132,8 @@ fn hex32(text: &str) -> Option<u32> {
 /// main.dol's part of the mods' minigames: the data at `at` (the table, then what it needs) and the patches.
 pub struct Table {
     pub data: Vec<u8>,
+    /// Its entries (without the ones that round it up).
+    pub count: u32,
     /// (address, new instruction, original instruction)
     pub patches: Vec<(u32, u32, u32)>,
 }
@@ -127,12 +170,10 @@ fn check(registry: &Registry, original: &[u8], added: &Added) -> Result<(), Link
         }
     }
     let n = seen.len() as u32;
-    if registry.count + n > registry.max {
+    let max = registry.max + registry.extra.as_ref().map_or(0, |e| e.room);
+    if registry.count + n > max {
         let all: Vec<&str> = added.iter().filter(|(_, l)| !l.is_empty()).map(|(id, _)| *id).collect();
-        return Err(LinkError::new(
-            format!("{n} mini-jeux ajoutés, la sauvegarde n'a de place que pour {}", registry.max - registry.count),
-            &all,
-        ));
+        return Err(LinkError::new(format!("{n} mini-jeux ajoutés, la sauvegarde n'a de place que pour {}", max - registry.count), &all));
     }
     Ok(())
 }
@@ -202,7 +243,18 @@ pub fn table(registry: &Registry, added: &Added, at: u32) -> Result<Table, LinkE
         };
         patches.push((address, (original & 0xFFFF_0000) | (value & 0xFFFF), original));
     }
-    Ok(Table { data, patches })
+    Ok(Table { data, count, patches })
+}
+
+/// The table's original place and bytes, free once the table is moved.
+pub fn reuse(registry: &Registry) -> Option<(u32, Vec<u8>)> {
+    let r = registry.reuse.as_ref()?;
+    let bytes = unhex(&registry.entries)?;
+    let size = r.size as usize;
+    if bytes.len() < size {
+        return None;
+    }
+    Some((hex32(&r.address)?, bytes[..size].to_vec()))
 }
 
 /// The list `wpMinigames` of the core's modules (wp/mod/minigames.h WpMinigame), ended by an id -1.
@@ -210,12 +262,20 @@ pub fn module_list(added: &Added) -> Vec<u8> {
     let mut out = Vec::new();
     for (_, list) in added {
         for m in list.iter() {
-            for v in [m.id, category(&m.category).unwrap_or(CATEGORY_NONE), m.rules.unwrap_or(m.id), m.controls.unwrap_or(-1), (!m.free_play) as i32] {
+            let fields = [
+                m.id,
+                category(&m.category).unwrap_or(CATEGORY_NONE),
+                m.rules.unwrap_or(m.id),
+                m.controls.unwrap_or(-1),
+                (!m.free_play) as i32,
+                m.controls_team.unwrap_or(-1),
+            ];
+            for v in fields {
                 out.extend_from_slice(&v.to_be_bytes());
             }
         }
     }
-    for v in [-1i32, 0, 0, 0, 0] {
+    for v in [-1i32, 0, 0, 0, 0, -1] {
         out.extend_from_slice(&v.to_be_bytes());
     }
     out
@@ -244,6 +304,8 @@ mod tests {
             max: 4,
             unroll: 4,
             entries,
+            reuse: Some(Reuse { address: "0x80200000".into(), size: 0x40 }),
+            extra: None,
             sites: vec![
                 site("0x80010000", "count", "38000002", 0, 0, ""),
                 site("0x80010004", "unrolled", "38000001", 0, 0, ""),
@@ -255,7 +317,7 @@ mod tests {
     }
 
     fn spec(id: i32) -> Spec {
-        Spec { id, category: "4p".into(), kind: Some("A".into()), pool: true, sounds_of: 406, rules: None, controls: Some(42), free_play: true }
+        Spec { id, category: "4p".into(), kind: Some("A".into()), pool: true, sounds_of: 406, rules: None, controls: Some(42), controls_team: None, free_play: true }
     }
 
     #[test]
@@ -272,7 +334,7 @@ mod tests {
         assert_eq!(&t.data[0x80..], &[1, 2, 3, 4, 5, 6, 7, 8]);
         let p: Vec<(u32, u32)> = t.patches.iter().map(|p| (p.0, p.1)).collect();
         assert_eq!(p, [(0x80010000, 0x38000003), (0x80010004, 0x38000001), (0x80010008, 0x3CA08000), (0x8001000C, 0x38A51810), (0x80010010, 0x38C50084)]);
-        assert_eq!(module_list(&vec![("winter", &mine[..])]).len(), 40);
+        assert_eq!(module_list(&vec![("winter", &mine[..])]).len(), 48);
     }
 
     #[test]
@@ -285,5 +347,19 @@ mod tests {
         assert_eq!(e.mods, ["a", "b"]);
         let old = [spec(406)];
         assert!(table(&r, &vec![("a", &old[..])], 0x8000_1800).is_err());
+    }
+
+    #[test]
+    fn extra_room_raises_the_limit() {
+        let mut r = registry();
+        r.extra = Some(Extra { object: "minigames.o".into(), room: 2, table: "t".into(), count: "c".into(), replace: vec![] });
+        let four = [spec(444), spec(445), spec(446), spec(447)];
+        let t = table(&r, &vec![("a", &four[..])], 0x8000_1800).unwrap();
+        assert_eq!(t.count, 6);
+        let five = [spec(444), spec(445), spec(446), spec(447), spec(448)];
+        let e = table(&r, &vec![("a", &five[..])], 0x8000_1800).err().unwrap();
+        assert!(e.message.contains("que pour 4"), "{}", e.message);
+        let (at, bytes) = reuse(&r).unwrap();
+        assert_eq!((at, bytes.len()), (0x8020_0000, 0x40));
     }
 }

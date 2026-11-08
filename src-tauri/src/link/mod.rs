@@ -182,6 +182,7 @@ pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mo
         lines.join("\n")
     );
     let path = out.join("linked.xml");
+    std::fs::create_dir_all(out).map_err(io)?;
     std::fs::write(&path, xml).map_err(io)?;
     Ok(Some(Linked { xml: path, files }))
 }
@@ -206,7 +207,8 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
 
     // the mods' minigames: main.dol's longer table, at the start of the mods' memory
     let added: minigames::Added = mods.iter().filter(|m| !m.minigames.is_empty()).map(|m| (m.id, &m.minigames[..])).collect();
-    let mut table = minigames::Table { data: vec![], patches: vec![] };
+    let mut table = minigames::Table { data: vec![], count: 0, patches: vec![] };
+    let mut registry = None;
     if !added.is_empty() {
         let ids: Vec<&str> = added.iter().map(|a| a.0).collect();
         let text = std::fs::read_to_string(core.join("main.json")).map_err(|_| LinkError::new("ce launcher ne sait pas encore ajouter de mini-jeux (cœur sans main.json)".into(), &ids))?;
@@ -216,6 +218,11 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         }
         let info: MainInfo = serde_json::from_str(&text).map_err(|e| LinkError::new(format!("main.json : {e}"), &[]))?;
         table = minigames::table(&info.minigames, &added, dol::BASE)?;
+        if dol::BASE + table.data.len() as u32 > dol::END {
+            let over = dol::BASE + table.data.len() as u32 - dol::END;
+            return Err(LinkError::new(format!("trop de mini-jeux ajoutés : leur table dépasse la place libre ({over} octets de trop)"), &ids));
+        }
+        registry = Some(info.minigames);
     }
 
     // main.dol
@@ -231,9 +238,28 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
             injects.push(dol::Inject { symbol: i.at.clone(), offset, expect, handler: i.call.clone(), after: i.after });
         }
         let writes = m.writes.iter().filter(|w| w.0 == "main").map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
-        parts.push(dol::DolPart { id: m.id.to_string(), objects, injects, writes });
+        parts.push(dol::DolPart { id: m.id.to_string(), objects, injects, writes, ..Default::default() });
     }
-    for p in dol::link(&parts, &main, &table.data)? {
+    // more minigames than the save's arrays hold: the core's code keeps the others (minigames.rs)
+    if let Some(extra) = registry.as_ref().filter(|r| table.count > r.max).and_then(|r| r.extra.as_ref()) {
+        let fail = |msg: String| LinkError::new(format!("cœur des mods : {msg}"), &[]);
+        let object = elf::Object::parse(&std::fs::read(core.join(&extra.object)).map_err(io)?).map_err(|e| fail(format!("{} : {e}", extra.object)))?;
+        let mut replaces = Vec::new();
+        for r in &extra.replace {
+            let expect = hex(&r.expect).ok_or_else(|| fail(format!("instruction « {} » invalide", r.expect)))?;
+            let at = main.get(&r.at).ok_or_else(|| fail(format!("« {} » n'est pas dans main.dol", r.at)))?.0;
+            // a function that starts with the table's address: the original runs the patched instruction
+            let run = match table.patches.iter().position(|p| p.0 == at) {
+                Some(i) => table.patches.remove(i).1,
+                None => expect,
+            };
+            replaces.push(dol::Replace { symbol: r.at.clone(), expect, run, handler: r.call.clone(), original: r.original.clone() });
+        }
+        let writes = vec![(extra.table.clone(), 0, dol::BASE.to_be_bytes().to_vec()), (extra.count.clone(), 0, table.count.to_be_bytes().to_vec())];
+        parts.push(dol::DolPart { id: "cœur".into(), objects: vec![object], replaces, writes, ..Default::default() });
+    }
+    let spare = registry.as_ref().and_then(minigames::reuse).map(|(address, original)| dol::Spare { address, original });
+    for p in dol::link(&parts, &main, &table.data, spare.as_ref())? {
         match &p.original {
             Some(o) => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}" original="{}"/>"#, p.address, hexs(&p.value), hexs(o))),
             None => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}"/>"#, p.address, hexs(&p.value))),
