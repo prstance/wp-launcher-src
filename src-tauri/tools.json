@@ -10,13 +10,13 @@
     },
     "windows": {
       "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-3/dolphin-wp-windows-x64.zip",
-      "sha256": null,
+      "sha256": "8275c80cf70f869509dd20fcf3138b3a971d26aeef36ef15bff2f46aaf2ba427",
       "bin": "Dolphin/Dolphin.exe",
       "tool": "Dolphin/DolphinTool.exe"
     },
     "macos": {
       "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-3/dolphin-wp-macos-arm64.tar.gz",
-      "sha256": null,
+      "sha256": "e4bb28e350acf709a37970cf2d4b2cc8154e1e0310ac7b294aadf7810887cca6",
       "bin": "Dolphin.app/Contents/MacOS/Dolphin",
       "tool": "dolphin-tool"
     }
