@@ -24,6 +24,14 @@ jobs:
         os: [ubuntu-24.04, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
+      # (before building: an empty or wrong token only shows when publishing)
+      - name: The releases token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::RELEASES_TOKEN est vide"; exit 1; }
+          gh api repos/prstance/wp-launcher --jq .full_name
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

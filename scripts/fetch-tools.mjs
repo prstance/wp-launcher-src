@@ -49,14 +49,24 @@ function extract(archive, dest) {
   if (archive.endsWith(".zip") && process.platform !== "win32") execFileSync("unzip", ["-q", archive, "-d", dest]);
   else execFileSync("tar", ["-xf", archive, "-C", dest]);
   // Links (an AppImage's desktop entry and icon…) become plain files or go,
-  // so the folder copies anywhere as a resource.
+  // so the folder copies anywhere as a resource. A link to a program or library
+  // goes: copied elsewhere, its $ORIGIN library path no longer finds its libraries
+  // (Dolphin's AppRun.wrapped, which linuxdeploy then can't bundle in the AppImage).
   for (const entry of fs.readdirSync(dest, { recursive: true, withFileTypes: true })) {
     const link = path.join(entry.parentPath, entry.name);
     if (!entry.isSymbolicLink()) continue;
     const target = fs.existsSync(link) ? fs.realpathSync(link) : null;
     fs.rmSync(link);
-    if (target && fs.statSync(target).isFile()) fs.copyFileSync(target, link);
+    if (target && fs.statSync(target).isFile() && !isElf(target)) fs.copyFileSync(target, link);
   }
+}
+
+function isElf(file) {
+  const fd = fs.openSync(file, "r");
+  const magic = Buffer.alloc(4);
+  fs.readSync(fd, magic, 0, 4, 0);
+  fs.closeSync(fd);
+  return magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
 }
 
 let failed = false;
