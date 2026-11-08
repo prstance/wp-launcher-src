@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         # (Linux as Dolphin's build, wp-dolphin's wp-build.yml: glibc 2.38)
-        os: [ubuntu-24.04, windows-latest, macos-14]
+        os: [ubuntu-24.04, windows-latest, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -56,3 +56,4 @@ jobs:
           releaseBody: Télécharge l’installateur de ton système ci-dessous. Il te faut ton propre disque de Wii Party (PAL, SUPP01).
           releaseDraft: false
           includeUpdaterJson: true
+          args: --verbose
