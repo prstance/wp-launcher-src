@@ -305,7 +305,8 @@ enregistrés dans les paramètres du launcher et s'appliquent au lancement suiva
 ]
 ```
 
-- `type` : `toggle` (valeur 0 ou 1), `choice` (une des `choices`) ou `number` (de `min` à `max`, par `step`).
+- `type` : `toggle` (valeur 0 ou 1), `choice` (une des `choices`) ou `number` (de `min` à `max`, par `step` :
+  boutons − et +, ou la valeur tapée dans son champ, ramenée dans les bornes et sur un pas).
 - `riivolution` : le réglage choisit une option d'un des XML du paquet, sans code dans le mod. Pour un
   `choice`, la valeur est le numéro du choix Riivolution (0 désactive l'option) ; un `toggle` active le
   choix `on` (1 par défaut). L'option ne doit pas être aussi dans les `options` fixes du patch.

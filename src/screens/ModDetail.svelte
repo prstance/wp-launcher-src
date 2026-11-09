@@ -26,7 +26,6 @@
       : t('{n} Mo', { n: (bytes / 1024 / 1024).toLocaleString(lang(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }) });
   const meta = (d) =>
     [t('Version {v}', { v: d.version }), ...(d.authors.length ? [d.authors.join(', ')] : []), d.games.join(', '), size(d.size), ...(d.shipped ? [t('Fournie avec le launcher')] : [])].join(' · ');
-  const number = (n) => n.toLocaleString(lang(), { maximumFractionDigits: 3 });
 
   const attempt = async (work) => {
     busy = true;
@@ -78,6 +77,23 @@
     change(setting, Math.min(setting.max ?? Infinity, Math.max(setting.min ?? -Infinity, next)));
   };
 
+  /** A number typed in its field: kept within its bounds, on its steps; anything else puts the value back. */
+  const typed = (setting, input) => {
+    const raw = Number(input.value.replace(/[\s  ]/g, '').replace(',', '.'));
+    if (input.value.trim() === '' || !Number.isFinite(raw)) {
+      input.value = setting.value;
+      return;
+    }
+    const min = setting.min ?? 0;
+    const unit = setting.step || 1;
+    const value = Math.min(setting.max ?? Infinity, Math.max(min, +(min + Math.round((raw - min) / unit) * unit).toFixed(10)));
+    input.value = value;
+    if (value !== setting.value) change(setting, value);
+  };
+
+  /** The field's width: the widest value it can hold. */
+  const digits = (s) => Math.max(String(s.min ?? 0).length, String(s.max ?? s.value).length, 2);
+
   const enable = () => attempt(async () => (isVersion ? activateVersion(id) : setModEnabled(id, !detail.enabled)).then(load));
 
   const remove = () =>
@@ -116,7 +132,7 @@
     {:else}
       <span role="group" aria-label={local(s.label)} style="flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 12px; background: var(--surface);">
         <button type="button" class="step" aria-label={t('Moins')} disabled={busy || s.value <= (s.min ?? -Infinity)} onclick={() => step(s, -1)}>−</button>
-        <span style="min-width: 48px; text-align: center; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums;">{number(s.value)}</span>
+        <input class="number" type="text" inputmode="numeric" aria-label={local(s.label)} disabled={busy} value={s.value} onchange={(e) => typed(s, e.currentTarget)} onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} style="width: calc({digits(s)}ch + 16px);" />
         <button type="button" class="step" aria-label={t('Plus')} disabled={busy || s.value >= (s.max ?? Infinity)} onclick={() => step(s, 1)}>+</button>
       </span>
     {/if}
@@ -257,5 +273,28 @@
   .step:disabled {
     cursor: default;
     opacity: 0.4;
+  }
+  .number {
+    box-sizing: border-box;
+    min-width: 48px;
+    height: 30px;
+    padding: 0 8px;
+    border: 2px solid transparent;
+    border-radius: 9px;
+    background: transparent;
+    text-align: center;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+  }
+  .number:hover:not(:disabled) {
+    background: #ffffff;
+  }
+  .number:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: #ffffff;
   }
 </style>
