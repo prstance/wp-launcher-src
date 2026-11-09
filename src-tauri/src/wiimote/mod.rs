@@ -315,6 +315,9 @@ impl Manager {
                 let supported = !matches!(self.bt, Err(Availability::Unsupported));
                 self.listener = if supported { listen(self.tx.clone()) } else { None };
                 self.shared = self.listener.is_none();
+                if self.shared {
+                    self.release_motion_plus().await;
+                }
                 let _ = reply.send(self.listener.as_ref().map(|(path, _)| path.clone()));
             }
             Msg::TakeBack => {
@@ -622,6 +625,20 @@ impl Manager {
             }
             Input::Buttons(buttons) => r.set_buttons(app, drives_ui, buttons),
             Input::Other => {}
+        }
+    }
+
+    /// Before Dolphin opens the remotes itself (no bridge: Windows): the MotionPlus the
+    /// launcher turned on goes off, as on a Wii, where a game that doesn't use it never
+    /// sees it. Left on, the game takes it for an extension it doesn't know and gets no
+    /// pointer. TakeBack looks for it again afterwards.
+    async fn release_motion_plus(&mut self) {
+        let (addr, value) = protocol::EXTENSION_INIT[0];
+        for r in self.slots.iter_mut().flatten() {
+            if matches!(r.motion_plus, MotionPlusState::Starting | MotionPlusState::Active) {
+                let _ = r.link.send(&protocol::write_register(addr, &[value])).await;
+                r.motion_plus = MotionPlusState::Absent;
+            }
         }
     }
 

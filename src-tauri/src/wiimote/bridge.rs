@@ -28,6 +28,12 @@ const DOT_SIZE: u8 = 2;
 /// Answer for an address with no device behind it, as on a remote with no extension.
 const NO_DEVICE: u8 = 7;
 const IR_TRACKING_ON: u8 = 0x08;
+/// The camera's middle, which the bar turns around when the remote is twisted.
+const CAMERA_MIDDLE: (f32, f32) = (512.0, 384.0);
+/// An accelerometer's zero and the size of 1 g, in 10-bit units, until the remote's own
+/// calibration goes by.
+const ACCEL_ZERO: i32 = 0x200;
+const ACCEL_ONE_G: i32 = 0x68;
 
 #[derive(Default, Debug, PartialEq)]
 pub struct Forward {
@@ -55,6 +61,11 @@ pub struct Proxy {
     bar_seen: Option<Instant>,
     /// Pointer from the gyroscope, -1 to 1 from left to right and top to bottom.
     pointer: Option<(f32, f32)>,
+    /// How far the bar turns in the camera, from the twist the accelerometer sees, in
+    /// radians: games read the twist from the angle between the two dots.
+    twist: f32,
+    accel_zero: [i32; 3],
+    accel_one_g: i32,
     last_sample: Instant,
 }
 
@@ -76,6 +87,9 @@ impl Proxy {
             gyro,
             bar_seen: None,
             pointer: None,
+            twist: 0.0,
+            accel_zero: [ACCEL_ZERO; 3],
+            accel_one_g: ACCEL_ONE_G,
             last_sample: Instant::now(),
         }
     }
@@ -189,6 +203,10 @@ impl Proxy {
                 if report.len() >= 4 {
                     self.buttons = [report[2], report[3]];
                 }
+                // The game reading the accelerometer's calibration.
+                if report[1] == 0x21 && report.len() >= 14 && report[5..7] == [0x00, 0x16] && report[4] & 0x0F == 0 {
+                    self.calibrate(&report[7..14]);
+                }
                 out.to_game.push(report.to_vec());
             }
             0x37 if report.len() >= 23 => self.data(report, now, &mut out),
@@ -215,6 +233,7 @@ impl Proxy {
             self.bar_seen = Some(now);
             self.pointer = None;
         }
+        self.follow_twist(report);
         let gyro_time = !bar && self.gyro.ready() && self.bar_seen.is_none_or(|t| now.duration_since(t) > BAR_MEMORY);
         let dots = if bar {
             raw
@@ -260,6 +279,27 @@ impl Proxy {
         }
     }
 
+    /// Zero and 1 g of each axis, from the remote's memory at 0x16 (their 8 high bits are
+    /// enough here).
+    fn calibrate(&mut self, cal: &[u8]) {
+        let zero = [0, 1, 2].map(|i| (cal[i] as i32) << 2);
+        let size = (0..3).map(|i| ((cal[4 + i] as i32) << 2) - zero[i]).sum::<i32>() / 3;
+        if size > 0 {
+            self.accel_zero = zero;
+            self.accel_one_g = size;
+        }
+    }
+
+    /// The twist from where gravity pulls, while the remote isn't pointing up or down.
+    fn follow_twist(&mut self, report: &[u8]) {
+        let x = ((report[4] as i32) << 2 | (report[2] as i32 >> 5 & 3)) - self.accel_zero[0];
+        let z = ((report[6] as i32) << 2 | (report[3] as i32 >> 6 & 1) << 1) - self.accel_zero[2];
+        let (x, z) = (x as f32, z as f32);
+        if (x * x + z * z).sqrt() > self.accel_one_g as f32 * 0.5 {
+            self.twist = x.atan2(z);
+        }
+    }
+
     /// Follows the turns; pushing past an edge is how you re-centre it, like lifting a mouse.
     fn point(&mut self, (yaw, pitch): (f32, f32)) -> [(u16, u16); 4] {
         let (x, y) = self.pointer.unwrap_or((0.0, 0.0));
@@ -268,7 +308,13 @@ impl Proxy {
         self.pointer = Some((x, y));
         // The camera sees the bar move the other way from the pointer, horizontally.
         let (mid_x, mid_y) = (512.0 - x * REACH_X, CENTRE_Y + y * REACH_Y);
-        let dot = |side: f32| ((mid_x + side * DOTS_APART / 2.0) as u16, mid_y as u16);
+        let (sin, cos) = self.twist.sin_cos();
+        let dot = |side: f32| {
+            let (dx, dy) = (mid_x + side * DOTS_APART / 2.0 - CAMERA_MIDDLE.0, mid_y - CAMERA_MIDDLE.1);
+            let x = CAMERA_MIDDLE.0 + dx * cos - dy * sin;
+            let y = CAMERA_MIDDLE.1 + dx * sin + dy * cos;
+            (x.clamp(0.0, 1022.0) as u16, y.clamp(0.0, 767.0) as u16)
+        };
         [dot(-1.0), dot(1.0), EMPTY, EMPTY]
     }
 }
@@ -442,6 +488,61 @@ mod tests {
         assert_ne!(last.0, centre.0);
         assert_eq!(last.1, centre.1);
         assert!(last.0 < 1023 && last.2 < 1023);
+    }
+
+    /// The two dots the gyroscope makes, as (x, y) pairs.
+    fn gyro_dots(p: &mut Proxy, r: &[u8], now: Instant) -> [(u16, u16); 2] {
+        let out = p.from_remote(r, now).to_game.remove(0);
+        let x = |i: usize| out[7 + i] as u16 | ((out[9 + i] as u16 >> 4) & 3) << 8;
+        let y = |i: usize| out[8 + i] as u16 | ((out[9 + i] as u16 >> 6) & 3) << 8;
+        [(x(0), y(0)), (x(3), y(3))]
+    }
+
+    /// A remote at rest, its face up (z at 1 g), or twisted (gravity partly along x).
+    fn held(x: u8, z: u8) -> Vec<u8> {
+        let mut r = report(NO_IR);
+        r[4] = x;
+        r[6] = z;
+        r
+    }
+
+    #[test]
+    fn the_twist_turns_the_dots_the_gyroscope_makes() {
+        let mut p = Proxy::new(true, Gyro::default());
+        game_set_up(&mut p, 0x33);
+        let now = calibrated(&mut p, Instant::now());
+        // Face up: level, as before.
+        let level = gyro_dots(&mut p, &held(0x80, 0x9A), now);
+        assert_eq!(level, [(442, 452), (582, 452)]);
+        // Twisted as Dolphin's emulated remote is with a positive roll (x below its zero):
+        // the left dot goes down the camera and the right one up, around the camera's middle.
+        let [left, right] = gyro_dots(&mut p, &held(0x78, 0x98), now);
+        assert!(left.1 > right.1, "{left:?} {right:?}");
+        let apart = ((right.0 as f32 - left.0 as f32).powi(2) + (right.1 as f32 - left.1 as f32).powi(2)).sqrt();
+        assert!((apart - DOTS_APART).abs() < 2.0, "{apart}");
+        // Pointing up or down, gravity says nothing about the twist: it stays.
+        let [l, r] = gyro_dots(&mut p, &held(0x80, 0x80), now);
+        assert!(l.1 > r.1);
+        // Twisted the other way.
+        let [left, right] = gyro_dots(&mut p, &held(0x88, 0x98), now);
+        assert!(left.1 < right.1);
+    }
+
+    #[test]
+    fn reads_the_accelerometer_calibration_the_game_asks_for() {
+        let mut p = Proxy::new(true, Gyro::default());
+        // Zero at 0x84 on each axis, 1 g at 0x9E: 0x68 in 10 bits.
+        let mut reply = vec![0xA1, 0x21, 0x00, 0x08, 0x90, 0x00, 0x16, 0x84, 0x84, 0x84, 0x00, 0x9E, 0x9E, 0x9E, 0x00];
+        reply.resize(23, 0);
+        assert_eq!(p.from_remote(&reply, Instant::now()).to_game, [reply.clone()]);
+        assert_eq!(p.accel_zero, [0x210; 3]);
+        assert_eq!(p.accel_one_g, 0x68);
+        // Another address is something else.
+        let mut other = reply.clone();
+        other[6] = 0x20;
+        let mut q = Proxy::new(true, Gyro::default());
+        q.from_remote(&other, Instant::now());
+        assert_eq!(q.accel_zero, [ACCEL_ZERO; 3]);
     }
 
     #[test]
