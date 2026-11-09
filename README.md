@@ -7,12 +7,15 @@ Launcher de bureau (Linux, Windows, macOS) : **Tauri 2** + **Svelte 5** + Vite.
 | Compile | oui | vérifié par `cargo check` | vérifié par `cargo check` (arm64) |
 | Lancé pour de vrai | oui | **jamais** | **jamais** |
 | Jeu, versions `.wpver`, mods `.wpmod` | oui | code commun, non testé | code commun, non testé |
-| Wiimotes connectées par le launcher, main, croix, passage au jeu sans déconnexion | oui | **non** | **non** |
-| Wiimotes dans le jeu | par le launcher | par Dolphin (à appairer au système), non testé | par Dolphin, non testé |
+| Wiimotes connectées par le launcher, main, croix, passage au jeu sans déconnexion | oui | code écrit, non testé | **non** |
+| Wiimotes dans le jeu | par le launcher (socket Unix) | par le launcher (pipe nommé), non testé | par Dolphin, non testé |
 
-Il n'existe de transport Bluetooth que pour Linux (`src-tauri/src/wiimote/linux.rs`) et le pont vers Dolphin
-passe par une socket Unix : ailleurs, `unsupported.rs` prend le relais et le jeu démarre sans passer par le launcher
-pour les manettes. Dolphin n'existe qu'en arm64 sur macOS : un Mac Intel n'a pas de quoi lancer le jeu.
+Le launcher a un transport Bluetooth pour Linux (`src-tauri/src/wiimote/linux.rs`, BlueZ et L2CAP) et
+pour Windows (`windows.rs`, API Bluetooth de Windows et périphérique HID, jamais essayé sur une vraie
+machine). Le pont vers Dolphin passe par une socket Unix sous Linux et par un pipe nommé sous Windows,
+avec le même protocole. Sur macOS, `unsupported.rs` prend le relais et le jeu démarre sans passer par
+le launcher pour les manettes. Dolphin n'existe qu'en arm64 sur macOS : un Mac Intel n'a pas de quoi
+lancer le jeu.
 
 ## Lancer
 
@@ -72,8 +75,8 @@ GitHub Actions et publiée en release avec ses SHA-256.
 Le launcher se connecte lui-même aux Wiimotes (écran Manettes), comme le fait Dolphin : BlueZ
 sert à les découvrir, puis le launcher ouvre les deux canaux HID L2CAP (PSM 0x11 et 0x13).
 
-- Linux uniquement pour l'instant (crate `bluer`, service `bluetoothd` requis) ; ailleurs l'écran
-  affiche « Pas encore disponible ».
+- Linux (crate `bluer`, service `bluetoothd` requis) et Windows (`windows.rs`, jamais essayé sur une
+  vraie machine) ; sur macOS l'écran affiche « Pas encore disponible ».
 - 4 places J1–J4 : LED du joueur, batterie (relue toutes les minutes), extension détectée
   (Nunchuk, Classique…), test des boutons en direct, vibration pour identifier, changement de place.
 - Une Wiimote déjà appairée qui se reconnecte toute seule est prise par le pilote HID du système :
@@ -101,13 +104,15 @@ Jouer → choix de l'ISO → vérification → Dolphin (`src-tauri/src/game.rs`,
 - L'ISO se choisit avec l'explorateur ou par glisser-déposer ; `dolphin-tool header` refuse tout ce
   qui n'est pas Wii Party (identifiant `SUP…`). Formats : iso, wbfs, rvz, gcz, wia, ciso.
 - Il faut au moins une Wiimote connectée, sauf là où le launcher ne sait pas encore en connecter
-  (Windows, macOS) : `Wiimotes::has_player`, côté écrans `hasPlayer()`.
+  (macOS) : `Wiimotes::has_player`, côté écrans `hasPlayer()`.
 - `dolphin-tool verify` contrôle l'image si le réglage est actif. Une image moddée y signale des
   anomalies : le joueur choisit alors « Lancer quand même » ou un autre ISO.
-- Les Wiimotes ne se déconnectent pas : le launcher ouvre une socket locale et la passe à Dolphin
-  (`WP_WIIMOTE_BRIDGE`, `IOBridge.*` dans le fork), qui reçoit les rapports de chaque place J1–J4 au
-  lieu de chercher des manettes en Bluetooth. Une Wiimote qui décroche pendant la partie retrouve sa
-  place avec 1 et 2.
+- Les Wiimotes ne se déconnectent pas : le launcher ouvre une socket Unix locale (Windows : un pipe
+  nommé `\\.\pipe\wp-launcher-<pid>`, réservé aux clients locaux, même protocole) et la passe à
+  Dolphin (`WP_WIIMOTE_BRIDGE`, `IOBridge.*` dans le fork), qui reçoit les rapports de chaque place
+  J1–J4 au lieu de chercher des manettes en Bluetooth. Une Wiimote qui décroche pendant la partie
+  retrouve sa place avec 1 et 2. Sous Windows, si le pipe ne peut pas être créé, le launcher lâche ses
+  manettes sans les déconnecter et Dolphin les ouvre lui-même.
 - Pendant la partie, l'écran Manettes fonctionne aussi. Changer de place ferme la socket des deux
   joueurs concernés : Dolphin redemande chaque place, et le jeu voit les manettes se reconnecter. La
   recherche ajoute un joueur à une place libre, puis s'arrête, car elle ralentit le Bluetooth.

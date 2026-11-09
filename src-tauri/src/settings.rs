@@ -35,7 +35,11 @@ pub struct Settings {
     /// Jouer starts right away with `iso`, without showing the ISO screen.
     pub always_use_iso: bool,
     pub verify_iso: bool,
-    pub fullscreen: bool,
+    /// How the game opens: 0 full screen, 1 full screen in a borderless window, 2 in a window.
+    pub window_mode: u32,
+    /// Before `window_mode`: only read from older settings, then forgotten.
+    #[serde(skip_serializing)]
+    pub fullscreen: Option<bool>,
     /// Wii console language (0 Japanese, 1 English, 2 German, 3 French, 4 Spanish, 5 Italian, 6 Dutch).
     pub game_language: u32,
     /// Dolphin's internal resolution multiplier.
@@ -46,6 +50,9 @@ pub struct Settings {
     pub show_fps: bool,
     pub volume: u32,
     pub minimize_in_game: bool,
+    /// The sensor bar sits on top of the screen (false: below it), for the launcher's
+    /// pointer and the game's.
+    pub sensor_bar_top: bool,
     /// What's being played, on the player's Discord profile (discord.rs).
     pub discord_presence: bool,
     /// The launcher's language: "fr", "en", "es", or "auto" for the system's.
@@ -69,7 +76,8 @@ impl Default for Settings {
             recent: Vec::new(),
             always_use_iso: false,
             verify_iso: true,
-            fullscreen: true,
+            window_mode: 0,
+            fullscreen: None,
             game_language: 3,
             resolution: 3,
             aspect: 0,
@@ -77,6 +85,7 @@ impl Default for Settings {
             show_fps: false,
             volume: 100,
             minimize_in_game: true,
+            sensor_bar_top: false,
             discord_presence: true,
             language: "auto".to_string(),
             enabled_mods: Vec::new(),
@@ -96,7 +105,11 @@ fn file(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn load(app: &AppHandle) -> Settings {
     let saved = file(app).ok().and_then(|f| std::fs::read(f).ok());
-    saved.and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
+    let mut settings: Settings = saved.and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+    if settings.fullscreen.take() == Some(false) {
+        settings.window_mode = 2;
+    }
+    settings
 }
 
 fn save(app: &AppHandle, settings: &Settings) -> Result<(), String> {
@@ -155,6 +168,9 @@ pub fn settings_set(app: AppHandle, store: State<'_, Store>, patch: Value) -> Re
     let saved = store.update(&app, |s| *s = next)?;
     if patch.get("discordPresence").is_some() {
         crate::discord::refresh(&app);
+    }
+    if patch.get("sensorBarTop").is_some() {
+        app.state::<crate::wiimote::Wiimotes>().set_bar(saved.sensor_bar_top);
     }
     Ok(for_ui(&app, saved))
 }

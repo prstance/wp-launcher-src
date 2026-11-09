@@ -9,7 +9,7 @@ export const settings = $state({
   recent: [],
   alwaysUseIso: false,
   verifyIso: true,
-  fullscreen: true,
+  windowMode: 0, // 0 full screen, 1 borderless full screen, 2 windowed
   gameLanguage: 3,
   resolution: 3,
   aspect: 0,
@@ -17,6 +17,7 @@ export const settings = $state({
   showFps: false,
   volume: 100,
   minimizeInGame: true,
+  sensorBarTop: false, // the sensor bar on top of the screen, not below it
   discordPresence: true,
   language: "auto", // "fr", "en", "es" or "auto" (lib/i18n.svelte.js)
   autostart: false,

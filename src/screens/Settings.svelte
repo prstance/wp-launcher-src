@@ -14,6 +14,7 @@
   const LANGUAGES = [[3, 'Français'], [1, 'English'], [2, 'Deutsch'], [4, 'Español'], [5, 'Italiano'], [6, 'Nederlands'], [0, '日本語']];
   // Dolphin's multipliers of the Wii's 640×528.
   const RESOLUTIONS = $derived([[1, t('1× (natif, 528p)')], [2, '2× (720p)'], [3, '3× (1080p)'], [4, '4× (1440p)'], [6, '6× (4K)']]);
+  const WINDOW_MODES = $derived([[0, t('Plein écran')], [1, t('Plein écran fenêtré')], [2, t('Fenêtré')]]);
   const ASPECTS = $derived([[0, t('Automatique')], [1, '16:9'], [2, '4:3'], [3, t('Étirer à la fenêtre')]]);
   const LAUNCHER_LANGUAGE = $derived([['auto', t('Automatique')], ...LAUNCHER_LANGUAGES]);
 
@@ -140,12 +141,12 @@
             {#snippet iso()}{@render action(settings.iso ? t('Changer') : t('Choisir'), changeIso)}{/snippet}
             {#snippet always()}{@render toggle(t('Toujours utiliser cet ISO'), 'alwaysUseIso')}{/snippet}
             {#snippet verify()}{@render toggle(t('Vérifier l’ISO à chaque lancement'), 'verifyIso')}{/snippet}
-            {#snippet full()}{@render toggle(t('Plein écran au lancement'), 'fullscreen')}{/snippet}
+            {#snippet full()}{@render choice(t('Affichage du jeu'), 'windowMode', WINDOW_MODES)}{/snippet}
             {#snippet language()}{@render choice(t('Langue du jeu'), 'gameLanguage', LANGUAGES)}{/snippet}
             {@render row(t('ISO de Wii Party'), settings.iso ? `${settings.iso.path} · ${settings.iso.country}` : t('Aucun ISO choisi pour l’instant'), iso)}
             {@render row(t('Toujours utiliser cet ISO'), t('Jouer lance directement le jeu, sans repasser par le choix de l’ISO'), always)}
             {@render row(t('Vérifier l’ISO à chaque lancement'), t('Quelques secondes pour éviter de lancer une copie abîmée'), verify)}
-            {@render row(t('Plein écran au lancement'), t('Le jeu s’ouvre sur tout l’écran'), full)}
+            {@render row(t('Affichage du jeu'), t('Plein écran fenêtré : sur tout l’écran, mais on passe d’une fenêtre à l’autre sans attendre'), full)}
             {@render row(t('Langue du jeu'), t('Si le disque la contient (ta version peut en proposer moins)'), language, true)}
           {:else if sec === 2}
             {#snippet resolution()}{@render choice(t('Résolution interne'), 'resolution', RESOLUTIONS)}{/snippet}

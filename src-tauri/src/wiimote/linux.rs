@@ -13,6 +13,8 @@ use std::time::Duration;
 const PSM_CONTROL: u16 = 0x11;
 const PSM_INTERRUPT: u16 = 0x13;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// A remote that can't take a report this long is as good as gone.
+const SEND_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub struct Bluetooth {
     _session: Session,
@@ -46,8 +48,15 @@ pub struct Link {
 
 impl Link {
     pub async fn send(&self, report: &[u8]) -> Result<(), String> {
-        self.interrupt.send(report).await.map(|_| ()).map_err(|e| e.to_string())
+        tokio::time::timeout(SEND_TIMEOUT, self.interrupt.send(report))
+            .await
+            .map_err(|_| tr!("pas de réponse"))?
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
+
+    /// Closing the sockets drops the link here whatever happens.
+    pub fn keep_connected(&self) {}
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize, String> {
         match self.interrupt.recv(buf).await {

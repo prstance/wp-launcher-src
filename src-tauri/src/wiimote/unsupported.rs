@@ -22,6 +22,8 @@ impl Link {
     pub async fn recv(&self, _buf: &mut [u8]) -> Result<usize, String> {
         match *self {}
     }
+
+    pub fn keep_connected(&self) {}
 }
 
 impl Bluetooth {

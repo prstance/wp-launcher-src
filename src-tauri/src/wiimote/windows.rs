@@ -3,7 +3,7 @@
 //! through the HID device Windows makes of it. Windows keeps a remote's HID device
 //! around after it is gone, so whether it is connected comes from Bluetooth.
 
-use super::protocol::{is_wiimote_name, IN, OUT};
+use super::protocol::{self, is_wiimote_name};
 use super::Availability;
 use crate::i18n::tr;
 use std::ptr::{null, null_mut};
@@ -295,9 +295,8 @@ fn read(device: Arc<Handle>, addr: u64, stop: Arc<AtomicBool>, reports: mpsc::Un
             Err(e) => return end(e),
         };
         last_heard = Instant::now();
-        // The HID transaction header Windows leaves out, as it comes over L2CAP.
-        let report = [IN].into_iter().chain(buf[..n].iter().copied()).collect();
-        if reports.send(Ok(report)).is_err() {
+        // As it comes over L2CAP: header, then only the report's own bytes.
+        if reports.send(Ok(protocol::from_hid(&buf[..n]))).is_err() {
             return;
         }
     }
@@ -328,24 +327,34 @@ pub struct Link {
     device: Arc<Handle>,
     addr: u64,
     reports: Mutex<mpsc::UnboundedReceiver<Result<Vec<u8>, String>>>,
-    /// A failed write ends the link too: it's how Windows tells a remote is gone.
+    /// A failed write to a remote Bluetooth no longer has ends the link too.
     lost: mpsc::UnboundedSender<Result<Vec<u8>, String>>,
     /// One write at a time, in the order they're sent.
     writing: Mutex<()>,
     stop: Arc<AtomicBool>,
+    /// Closing the HID device leaves the remote connected (Dolphin has it).
+    keep: AtomicBool,
 }
 
 impl Link {
     pub async fn send(&self, report: &[u8]) -> Result<(), String> {
         // Windows adds the HID transaction header itself.
-        let report = report.strip_prefix(&[OUT]).unwrap_or(report).to_vec();
+        let report = protocol::to_hid(report).to_vec();
         let device = self.device.clone();
         let _turn = self.writing.lock().await;
         let result = spawn_blocking(move || write(&device, &report)).await.map_err(|e| e.to_string())?;
         if let Err(e) = &result {
-            let _ = self.lost.send(Err(e.clone()));
+            // One write that timed out isn't a remote gone: Bluetooth tells.
+            let addr = self.addr;
+            if !spawn_blocking(move || is_connected(addr)).await.unwrap_or(true) {
+                let _ = self.lost.send(Err(e.clone()));
+            }
         }
         result
+    }
+
+    pub fn keep_connected(&self) {
+        self.keep.store(true, Ordering::Relaxed);
     }
 
     pub async fn recv(&self, buf: &mut [u8]) -> Result<usize, String> {
@@ -362,21 +371,28 @@ impl Link {
 }
 
 impl Drop for Link {
-    // Closing the HID device leaves the remote connected to Windows: switch it off, as on Linux.
+    // Closing the HID device leaves the remote connected to Windows: switch it off, as on
+    // Linux (off the async runtime: the radio can take a while to answer).
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         unsafe { CancelIoEx(self.device.0, null()) };
-        let _ = disconnect(self.addr);
+        if !self.keep.load(Ordering::Relaxed) {
+            let addr = self.addr;
+            std::thread::spawn(move || {
+                let _ = disconnect(addr);
+            });
+        }
     }
 }
 
 impl Bluetooth {
     pub async fn open() -> Result<Self, Availability> {
-        radio().map(|_| Bluetooth).ok_or(Availability::NoAdapter)
+        let found = spawn_blocking(|| radio().is_some()).await.unwrap_or(false);
+        found.then_some(Bluetooth).ok_or(Availability::NoAdapter)
     }
 
     pub async fn powered(&self) -> bool {
-        radio().is_some_and(|radio| unsafe { BluetoothIsConnectable(radio.0) } != 0)
+        spawn_blocking(|| radio().is_some_and(|radio| unsafe { BluetoothIsConnectable(radio.0) } != 0)).await.unwrap_or(false)
     }
 
     pub async fn discover(&self) -> Result<Discovery, String> {
@@ -442,7 +458,7 @@ impl Bluetooth {
             let stop = Arc::new(AtomicBool::new(false));
             let (reader_device, reader_stop, reader_tx) = (device.clone(), stop.clone(), tx.clone());
             std::thread::spawn(move || read(reader_device, addr, reader_stop, reader_tx));
-            Ok(Link { device, addr, reports: Mutex::new(rx), lost: tx, writing: Mutex::new(()), stop })
+            Ok(Link { device, addr, reports: Mutex::new(rx), lost: tx, writing: Mutex::new(()), stop, keep: AtomicBool::new(false) })
         })
         .await
         .map_err(|e| e.to_string())?

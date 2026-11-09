@@ -1,7 +1,7 @@
 <script>
   import Sidebar from '../components/Sidebar.svelte';
   import { wiimotes, scan, disconnect, identify, moveTo, release, PLAYERS } from '../lib/wiimotes.svelte.js';
-  import { camera, aimSettings, setBar } from '../lib/remote-nav.svelte.js';
+  import { camera, barPosition, setBar } from '../lib/remote-nav.svelte.js';
   import { t } from '../lib/i18n.svelte.js';
 
   let sel = $state(0);
@@ -170,7 +170,7 @@
                 </span>
                 <div role="radiogroup" aria-label={t('Position de la sensor bar')} style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--surface);">
                   {#each [['above', t('Barre au-dessus')], ['below', t('Barre en dessous')]] as [value, label]}
-                    <button type="button" role="radio" aria-checked={aimSettings.bar === value} onclick={() => setBar(value)} style="flex: 1; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; background: {aimSettings.bar === value ? '#ffffff' : 'transparent'}; color: {aimSettings.bar === value ? 'var(--text)' : 'var(--muted)'}; box-shadow: {aimSettings.bar === value ? '0 3px 0 rgba(var(--shadow),0.12)' : 'none'}; font-size: 12px; font-weight: 800;">{label}</button>
+                    <button type="button" role="radio" aria-checked={barPosition() === value} onclick={() => setBar(value).catch(() => {})} style="flex: 1; height: 30px; padding: 0 10px; border: 0; border-radius: 999px; cursor: pointer; white-space: nowrap; background: {barPosition() === value ? '#ffffff' : 'transparent'}; color: {barPosition() === value ? 'var(--text)' : 'var(--muted)'}; box-shadow: {barPosition() === value ? '0 3px 0 rgba(var(--shadow),0.12)' : 'none'}; font-size: 12px; font-weight: 800;">{label}</button>
                   {/each}
                 </div>
               </div>

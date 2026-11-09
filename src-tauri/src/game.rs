@@ -25,7 +25,8 @@ const STATE_EVENT: &str = "game://state";
 /// Every image Dolphin reads that can hold a Wii disc.
 const DISC_FORMATS: [&str; 6] = ["iso", "wbfs", "rvz", "gcz", "wia", "ciso"];
 const RECENT_MAX: usize = 5;
-/// Tells our Dolphin build where to ask for the remotes (IOBridge.h in the fork).
+/// Tells our Dolphin build where to ask for the remotes (IOBridge.h in the fork): a Unix
+/// socket's path, or on Windows a named pipe's name.
 const WIIMOTE_BRIDGE: &str = "WP_WIIMOTE_BRIDGE";
 /// Asks our Dolphin build to print where the game is (WPGameState.h in the fork).
 const GAME_STATE: &str = "WP_GAME_STATE";
@@ -92,6 +93,17 @@ pub fn command(program: &Path) -> Command {
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW, for dolphin-tool
     cmd.stdin(Stdio::null());
     cmd
+}
+
+/// On a laptop, the game would otherwise run on the integrated chip (prime-run's variables).
+#[cfg(target_os = "linux")]
+const NVIDIA_OFFLOAD: [(&str, &str); 3] =
+    [("__NV_PRIME_RENDER_OFFLOAD", "1"), ("__GLX_VENDOR_LIBRARY_NAME", "nvidia"), ("__VK_LAYER_NV_optimus", "NVIDIA_only")];
+
+/// An NVIDIA card with its driver loaded.
+#[cfg(target_os = "linux")]
+fn nvidia_present() -> bool {
+    std::fs::read_dir("/proc/driver/nvidia/gpus").is_ok_and(|mut gpus| gpus.next().is_some())
 }
 
 fn dolphin_tool(app: &AppHandle) -> Result<PathBuf, String> {
@@ -180,15 +192,24 @@ async fn verify(app: &AppHandle, iso: &str) -> Result<bool, String> {
 fn dolphin_args(s: &Settings, iso: &str, user: &Path) -> Vec<String> {
     let bool_text = |b: bool| if b { "True" } else { "False" };
     let mut config = vec![
-        format!("Dolphin.Display.Fullscreen={}", bool_text(s.fullscreen)),
+        format!("Dolphin.Display.Fullscreen={}", bool_text(s.window_mode != 2)),
+        format!("Graphics.Settings.BorderlessFullscreen={}", bool_text(s.window_mode == 1)),
         format!("Dolphin.DSP.Volume={}", s.volume.min(100)),
+        // With the bridge, Dolphin's scanner only asks the launcher for the slots (its own
+        // Bluetooth scanners are off): it picks up a remote back in its slot at once.
         "Dolphin.Core.WiimoteContinuousScanning=True".to_string(),
         "Dolphin.Interface.ConfirmStop=False".to_string(),
         format!("SYSCONF.IPL.LNG={}", s.game_language),
+        // Where the game expects the bar's dots: 1 on top of the screen, 0 below it.
+        format!("SYSCONF.BT.BAR={}", s.sensor_bar_top as u8),
         format!("Graphics.Settings.InternalResolution={}", s.resolution),
         format!("Graphics.Settings.AspectRatio={}", s.aspect),
         format!("Graphics.Hardware.VSync={}", bool_text(s.vsync)),
         format!("Graphics.Settings.ShowFPS={}", bool_text(s.show_fps)),
+        // Ubershaders while a new effect's shader compiles, instead of the game
+        // freezing for it; the cached ones compiled before the game starts.
+        "Graphics.Settings.ShaderCompilationMode=2".to_string(),
+        "Graphics.Settings.WaitForShadersBeforeStarting=True".to_string(),
     ];
     config.extend((1..=4).map(|n| format!("Wiimote.Wiimote{n}.Source=2")));
 
@@ -269,6 +290,10 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     let wiimotes = app.state::<Wiimotes>().inner().clone();
     let bridge = wiimotes.lend().await;
     let mut cmd = command(&dolphin);
+    #[cfg(target_os = "linux")]
+    if nvidia_present() {
+        cmd.envs(NVIDIA_OFFLOAD);
+    }
     if let Some(bridge) = bridge {
         cmd.env(WIIMOTE_BRIDGE, bridge);
     }
@@ -454,13 +479,15 @@ mod tests {
 
     #[test]
     fn passes_settings_to_dolphin() {
-        let settings = Settings { fullscreen: false, resolution: 4, volume: 40, game_language: 4, ..Default::default() };
+        let settings = Settings { window_mode: 2, resolution: 4, volume: 40, game_language: 4, sensor_bar_top: true, ..Default::default() };
         let args = dolphin_args(&settings, "/jeux/wp.rvz", Path::new("/data/dolphin"));
         assert_eq!(args[..5], ["-b", "-u", "/data/dolphin", "-e", "/jeux/wp.rvz"]);
         for expected in [
             "Dolphin.Display.Fullscreen=False",
             "Dolphin.DSP.Volume=40",
+            "Dolphin.Core.WiimoteContinuousScanning=True",
             "SYSCONF.IPL.LNG=4",
+            "SYSCONF.BT.BAR=1",
             "Graphics.Settings.InternalResolution=4",
             "Wiimote.Wiimote4.Source=2",
         ] {

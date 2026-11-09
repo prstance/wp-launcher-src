@@ -6,24 +6,11 @@ import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "./tauri.js";
 import { wiimotes } from "./wiimotes.svelte.js";
 import { router } from "./router.svelte.js";
+import { settings, settingsReady, setSettings } from "./settings.svelte.js";
 import { untrack } from "svelte";
 
-// Camera pixels (roll removed, from src-tauri/src/wiimote/protocol.rs) to window
-// fractions: how far the remote turns to cross the window. The bar drifts the
-// opposite way to the aim, and camera y points up: aiming right lowers x, aiming
-// down raises y.
-const SPAN_X = 800;
-const SPAN_Y = 450;
-// Where aiming straight at the sensor bar lands, by where the bar sits.
-const BAR_AT = { above: 0, below: 1 };
+// Where older launchers kept the sensor bar's position, before it was a setting.
 const BAR_KEY = "wp-sensor-bar";
-// Without a sensor bar, the MotionPlus gyroscope moves the hand like an air
-// mouse: degrees to turn to cross the window. As read on a Wii Remote Plus, a
-// turn to the right (yaw) and a tilt upwards (pitch) are positive.
-const GYRO_SPAN_X = 40;
-const GYRO_SPAN_Y = 25;
-// The bar counts as present if seen this recently; otherwise the gyroscope takes over.
-const BAR_MEMORY = 5000;
 
 const SMOOTHING = 0.45;
 const REPEAT_DELAY = 380;
@@ -36,34 +23,29 @@ const DIRECTIONS = { "↑": [0, -1], "↓": [0, 1], "←": [-1, 0], "→": [1, 0
 export const pointer = $state({ x: 0, y: 0, shown: false, pressed: false });
 
 /** What J1's camera sees (camera pixels, 1024×768), for the Manettes screen;
- *  source: what moves the hand, "bar", "gyro" or null. */
-export const camera = $state({ dots: [], aim: null, source: null });
+ *  source: what moves the hand, "bar", "gyro", "tilt" or null. */
+export const camera = $state({ dots: [], source: null });
 
-const saved = () => {
+/** Where the sensor bar sits: "above" or "below" the screen. */
+export const barPosition = () => (settings.sensorBarTop ? "above" : "below");
+
+/** The launcher's pointer (src-tauri/src/wiimote/pointer.rs) and the game both follow it. */
+export const setBar = (bar) => setSettings({ sensorBarTop: bar === "above" });
+
+settingsReady.then(() => {
   try {
-    return localStorage.getItem(BAR_KEY);
-  } catch {
-    return null;
-  }
-};
-
-/** bar: "above" or "below" the screen. */
-export const aimSettings = $state({ bar: saved() === "above" ? "above" : "below" });
-
-export function setBar(bar) {
-  aimSettings.bar = bar;
-  try {
-    localStorage.setItem(BAR_KEY, bar);
+    const saved = localStorage.getItem(BAR_KEY);
+    if (saved === null) return;
+    localStorage.removeItem(BAR_KEY);
+    if (saved === "above" && !settings.sensorBarTop) setBar("above").catch(() => {});
   } catch {}
-}
+});
 
 let target = null; // where the remote points, before smoothing
 let focused = null;
 let hovered = null;
 let focusedByPointer = false;
 let lastSpot = null; // centre of the last picked control, to pick up from after a screen change
-let barSeenAt = -Infinity;
-let gyro = null; // hand position in window fractions while the gyroscope drives it
 let repeat = null;
 let running = false;
 
@@ -171,37 +153,24 @@ function onButton({ button, down }) {
 
 const clamp = (v) => Math.min(Math.max(v, 0), 1);
 
+/** seen.pos: where J1 points, -1 to 1 across the screen (beyond: off it), worked out
+ *  in pointer.rs from the bar, the gyroscope or the tilt (seen.source). */
 function onPointer(seen) {
   camera.dots = seen?.dots ?? [];
-  camera.aim = seen?.aim ?? null;
-  const aim = camera.aim;
-  const now = performance.now();
-  if (aim) barSeenAt = now;
-
-  if (aim) {
-    camera.source = "bar";
-    gyro = null;
-    const fx = 0.5 - aim[0] / SPAN_X;
-    const fy = BAR_AT[aimSettings.bar] + aim[1] / SPAN_Y;
-    // A little past the edges still shows the hand, pinned to the border.
-    target = [clamp(fx) * innerWidth, clamp(fy) * innerHeight];
-    if (!pointer.shown) [pointer.x, pointer.y] = target;
-    pointer.shown = fx > -0.25 && fx < 1.25 && fy > -0.25 && fy < 1.25;
-  } else if (seen?.turn && now - barSeenAt > BAR_MEMORY) {
-    camera.source = "gyro";
-    // Starts where the hand was (or in the middle), then follows the turns;
-    // pushing past an edge is how you re-centre it, like lifting a mouse.
-    gyro ??= pointer.shown ? [pointer.x / innerWidth, pointer.y / innerHeight] : [0.5, 0.5];
-    gyro = [clamp(gyro[0] + seen.turn[0] / GYRO_SPAN_X), clamp(gyro[1] - seen.turn[1] / GYRO_SPAN_Y)];
-    target = [gyro[0] * innerWidth, gyro[1] * innerHeight];
-    if (!pointer.shown) [pointer.x, pointer.y] = target;
-    pointer.shown = true;
-  } else {
+  camera.source = seen?.source ?? null;
+  const pos = seen?.pos;
+  if (!pos) {
     // Bar just out of view (aiming off-screen), or nothing to point with.
-    camera.source = null;
     target = null;
     pointer.shown = false;
+    return;
   }
+  const fx = (pos[0] + 1) / 2;
+  const fy = (pos[1] + 1) / 2;
+  // A little past the edges still shows the hand, pinned to the border.
+  target = [clamp(fx) * innerWidth, clamp(fy) * innerHeight];
+  if (!pointer.shown) [pointer.x, pointer.y] = target;
+  pointer.shown = fx > -0.25 && fx < 1.25 && fy > -0.25 && fy < 1.25;
 }
 
 function frame() {

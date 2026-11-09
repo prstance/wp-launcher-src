@@ -67,6 +67,14 @@ pub fn read_register(addr: u32, size: u16) -> Vec<u8> {
     vec![OUT, 0x17, 0x04, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8, (size >> 8) as u8, size as u8]
 }
 
+/// Reads the remote's own memory (EEPROM), not its registers.
+pub fn read_memory(addr: u16, size: u16) -> Vec<u8> {
+    vec![OUT, 0x17, 0x00, 0x00, (addr >> 8) as u8, addr as u8, (size >> 8) as u8, size as u8]
+}
+
+/// The accelerometer's calibration in the remote's memory (zero, 1 g, checksum).
+pub const ACCEL_CAL: u16 = 0x0016;
+
 /// Steps that wake up an extension (unencrypted) and ask for its 6-byte id.
 pub const EXTENSION_INIT: [(u32, u8); 2] = [(0xA4_00F0, 0x55), (0xA4_00FB, 0x00)];
 pub const EXTENSION_ID: u32 = 0xA4_00FA;
@@ -78,9 +86,51 @@ pub const MOTION_PLUS_ID: u32 = 0xA6_00FA;
 /// Switches it on in standalone mode: it then takes the extension's place.
 pub const MOTION_PLUS_START: (u32, u8) = (0xA6_00FE, 0x04);
 
+/// Once on, its calibration (fast block then slow block) reads at the extension's address.
+pub const MOTION_PLUS_CAL: u32 = 0xA4_0020;
+
 /// Its id always ends in 0x05 (0x0005 inactive, 0x0405… once on).
 pub fn is_motion_plus(id: &[u8]) -> bool {
     id.len() == 6 && id[5] == 0x05
+}
+
+/// The id at the extension's address once it is on in standalone mode.
+pub fn is_active_motion_plus(id: &[u8]) -> bool {
+    id.len() == 6 && id[2..] == [0xA4, 0x20, 0x04, 0x05]
+}
+
+/// Bytes after the report id in each input report, as Dolphin's IOWin trims what
+/// Windows hands over (always a whole 22-byte report).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn input_size(id: u8) -> Option<usize> {
+    Some(match id {
+        0x20 => 6,
+        0x21 => 21,
+        0x22 => 4,
+        0x30 => 2,
+        0x31 => 5,
+        0x32 => 10,
+        0x33 => 17,
+        0x34..=0x37 | 0x3D..=0x3F => 21,
+        _ => return None,
+    })
+}
+
+/// An input report as Windows' HID driver hands it over (report id first, padded to the
+/// largest report) shaped as it comes over L2CAP on Linux, which is what the launcher and
+/// Dolphin's bridge expect: the transaction header Windows leaves out, then only the
+/// report's own bytes.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn from_hid(buf: &[u8]) -> Vec<u8> {
+    let n = buf.first().and_then(|&id| input_size(id)).map_or(buf.len(), |size| (size + 1).min(buf.len()));
+    [IN].into_iter().chain(buf[..n].iter().copied()).collect()
+}
+
+/// An output report (L2CAP shape, header first) as Windows' HID driver takes it: it adds
+/// the transaction header itself.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn to_hid(report: &[u8]) -> &[u8] {
+    report.strip_prefix(&[OUT]).unwrap_or(report)
 }
 
 pub enum Input {
@@ -129,103 +179,165 @@ pub fn parse(report: &[u8]) -> Input {
     }
 }
 
-/// Where the remote points, from the two sensor-bar dots: offset of their middle
-/// from the camera centre, in camera pixels, with the remote's roll taken out.
-/// Remembers the last pair so it keeps working while only one dot is in view.
-#[derive(Default)]
-pub struct Aim {
-    last: Option<((f32, f32), (f32, f32))>, // (middle, half the gap between the dots)
-}
-
-impl Aim {
-    pub fn update(&mut self, dots: &[(f32, f32)]) -> Option<(f32, f32)> {
-        let (mid, half) = match *dots {
-            [a, b, ..] => {
-                let (mut dx, mut dy) = ((b.0 - a.0) / 2.0, (b.1 - a.1) / 2.0);
-                if dx < 0.0 {
-                    (dx, dy) = (-dx, -dy);
-                }
-                (((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0), (dx, dy))
-            }
-            [d] => {
-                let (last_mid, half) = self.last?;
-                let dist = |m: (f32, f32)| (m.0 - last_mid.0).powi(2) + (m.1 - last_mid.1).powi(2);
-                let (left, right) = ((d.0 + half.0, d.1 + half.1), (d.0 - half.0, d.1 - half.1));
-                (if dist(left) < dist(right) { left } else { right }, half)
-            }
-            [] => return None,
-        };
-        self.last = Some((mid, half));
-        let (sin, cos) = half.1.atan2(half.0).sin_cos();
-        let (ox, oy) = (mid.0 - 512.0, mid.1 - 384.0);
-        Some((ox * cos + oy * sin, oy * cos - ox * sin))
-    }
-}
-
-/// One MotionPlus sample (from the extension bytes once it is active).
+/// One MotionPlus sample: raw 14-bit rates, [yaw, roll, pitch], and their slow flags.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MotionPlus {
-    yaw: f32,
-    pitch: f32,
-    yaw_slow: bool,
-    pitch_slow: bool,
+    pub raw: [u16; 3],
+    pub slow: [bool; 3],
     /// Something (Nunchuk…) is plugged into the MotionPlus.
     pub extension: bool,
 }
 
+/// Axes in samples and rates (roll is 1).
+pub const YAW: usize = 0;
+pub const PITCH: usize = 2;
+
 pub fn motion_plus(ext: &[u8; 6]) -> Option<MotionPlus> {
-    if ext[5] & 0x02 == 0 {
+    // Bits 1–0 of byte 5 read 1 0 in MotionPlus data; an empty port (0xFF) doesn't.
+    if ext[5] & 0x03 != 0x02 {
         return None;
     }
+    let value = |lo: u8, hi: u8| lo as u16 | ((hi >> 2) as u16) << 8;
     Some(MotionPlus {
-        yaw: (ext[0] as u16 | (ext[3] as u16 >> 2) << 8) as f32,
-        pitch: (ext[2] as u16 | (ext[5] as u16 >> 2) << 8) as f32,
-        yaw_slow: ext[3] & 0x02 != 0,
-        pitch_slow: ext[3] & 0x01 != 0,
+        raw: [value(ext[0], ext[3]), value(ext[1], ext[4]), value(ext[2], ext[5])],
+        slow: [ext[3] & 0x02 != 0, ext[4] & 0x02 != 0, ext[3] & 0x01 != 0],
         extension: ext[4] & 0x01 != 0,
     })
 }
 
-/// Turns MotionPlus rates into degrees turned. Each gyroscope rests at a slightly
-/// different value, so it learns that from moments when the remote lies still.
-#[derive(Default)]
+/// The MotionPlus's own calibration (32 bytes at 0x20 of its registers): per mode
+/// (0 fast, 1 slow) and axis, the raw rest value and raw units per degree/second.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GyroCal {
+    pub zero: [[f32; 3]; 2],
+    pub units: [[f32; 3]; 2],
+}
+
+impl Default for GyroCal {
+    /// Dolphin's emulated MotionPlus: 0x1100 raw for 1200°/s fast, 270°/s slow.
+    fn default() -> Self {
+        GyroCal { zero: [[8192.0; 3]; 2], units: [[4352.0 / 1200.0; 3], [4352.0 / 270.0; 3]] }
+    }
+}
+
+impl GyroCal {
+    /// Blocks of 16 bytes, fast then slow: zeros yaw roll pitch, scales yaw roll pitch
+    /// (big-endian u16, 16-bit = data << 2), degrees / 6, uid, 2 bytes of checksum.
+    pub fn parse(b: &[u8]) -> Option<GyroCal> {
+        if b.len() < 32 {
+            return None;
+        }
+        let mut cal = GyroCal::default();
+        for mode in 0..2 {
+            let block = &b[mode * 16..];
+            let word = |i: usize| u16::from_be_bytes([block[2 * i], block[2 * i + 1]]) as f32;
+            let degrees = block[12] as f32 * 6.0;
+            for axis in 0..3 {
+                let (zero, scale) = (word(axis), word(3 + axis));
+                cal.zero[mode][axis] = zero / 4.0;
+                cal.units[mode][axis] = (scale - zero).abs() / 4.0 / degrees;
+            }
+        }
+        let plausible = (0..3).all(|a| {
+            (6000.0..=10400.0).contains(&cal.zero[0][a])
+                && (6000.0..=10400.0).contains(&cal.zero[1][a])
+                && (2.5..=6.0).contains(&cal.units[0][a])
+                && (10.0..=22.0).contains(&cal.units[1][a])
+        });
+        plausible.then_some(cal)
+    }
+}
+
+/// Turns MotionPlus samples into degrees/second, learning each gyroscope's rest value
+/// (it drifts with temperature) from moments the remote is still: on a table, or
+/// roughly still in a hand.
+#[derive(Clone, Debug, Default)]
 pub struct Gyro {
-    bias: Option<(f32, f32)>,
-    still: Vec<(f32, f32)>,
+    pub cal: GyroCal,
+    /// Slow-mode rest values, raw.
+    bias: Option<[f32; 3]>,
+    /// Learned on a table once at least: in-hand windows only fine-tune it then.
+    confident: bool,
+    window: Vec<[f32; 3]>,
+    /// Every sample of the window had the bar saying the remote wasn't turning.
+    window_steady: bool,
 }
 
 impl Gyro {
-    // Raw units per degree/second (Dolphin's MotionPlus calibration).
-    const SLOW: f32 = 16.118;
-    const FAST: f32 = 3.6266;
-    const STILL_SAMPLES: usize = 32;
-    const STILL_SPREAD: f32 = 6.0;
+    /// ~0.3 s of reports.
+    const WINDOW: usize = 32;
+    /// Largest swing from the window's mean, raw slow units (16 ≈ 1°/s).
+    const TABLE_SPREAD: f32 = 8.0;
+    const HAND_SPREAD: f32 = 40.0;
+    /// How far an in-hand window may sit from the rest value to move it: a slow,
+    /// steady turn mustn't become the rest value.
+    const HAND_PULL: f32 = 24.0;
+    const ROUGH_PULL: f32 = 160.0;
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn ready(&self) -> bool {
         self.bias.is_some()
     }
 
-    /// Degrees turned (yaw, pitch) over `dt` seconds; None until calibrated.
-    pub fn update(&mut self, m: &MotionPlus, dt: f32) -> Option<(f32, f32)> {
-        if m.yaw_slow && m.pitch_slow {
-            self.still.push((m.yaw, m.pitch));
-            if self.still.len() == Self::STILL_SAMPLES {
-                let n = Self::STILL_SAMPLES as f32;
-                let mean = self.still.iter().fold((0.0, 0.0), |a, s| (a.0 + s.0 / n, a.1 + s.1 / n));
-                let spread = self.still.iter().fold(0f32, |a, s| a.max((s.0 - mean.0).abs()).max((s.1 - mean.1).abs()));
-                if spread < Self::STILL_SPREAD {
-                    self.bias = Some(match self.bias {
-                        Some(b) => (b.0 * 0.8 + mean.0 * 0.2, b.1 * 0.8 + mean.1 * 0.2),
-                        None => mean,
-                    });
-                }
-                self.still.clear();
+    /// Degrees/second [yaw, roll, pitch] (None until a rest value is known).
+    /// `steady`: something else (the sensor bar) says the remote isn't turning.
+    pub fn update(&mut self, m: &MotionPlus, steady: bool) -> Option<[f32; 3]> {
+        self.learn(m, steady);
+        let bias = self.bias?;
+        let c = &self.cal;
+        Some(std::array::from_fn(|a| {
+            let raw = m.raw[a] as f32;
+            if m.slow[a] {
+                (raw - bias[a]) / c.units[1][a]
+            } else {
+                // Same offset from the reference voltage, before the slow output's
+                // amplification: smaller in fast units.
+                let fast_bias = c.zero[0][a] + (bias[a] - c.zero[1][a]) * c.units[0][a] / c.units[1][a];
+                (raw - fast_bias) / c.units[0][a]
             }
-        } else {
-            self.still.clear();
+        }))
+    }
+
+    fn learn(&mut self, m: &MotionPlus, steady: bool) {
+        if !m.slow.iter().all(|&s| s) {
+            self.window.clear();
+            return;
         }
-        let (by, bp) = self.bias?;
-        let rate = |raw: f32, bias: f32, slow: bool| (raw - bias) / if slow { Self::SLOW } else { Self::FAST };
-        Some((rate(m.yaw, by, m.yaw_slow) * dt, rate(m.pitch, bp, m.pitch_slow) * dt))
+        if self.window.is_empty() {
+            self.window_steady = true;
+        }
+        self.window_steady &= steady;
+        self.window.push(m.raw.map(|r| r as f32));
+        if self.window.len() < Self::WINDOW {
+            return;
+        }
+        let n = self.window.len() as f32;
+        let mean: [f32; 3] = std::array::from_fn(|a| self.window.iter().map(|s| s[a]).sum::<f32>() / n);
+        let spread = self.window.iter().flat_map(|s| (0..3).map(move |a| (s[a] - mean[a]).abs())).fold(0f32, f32::max);
+        self.window.clear();
+        let off = |b: &[f32; 3]| (0..3).map(|a| (mean[a] - b[a]).abs()).fold(0f32, f32::max);
+        match self.bias {
+            _ if spread <= Self::TABLE_SPREAD => {
+                self.bias = Some(match (self.bias, self.confident) {
+                    (Some(b), true) => std::array::from_fn(|a| b[a] + (mean[a] - b[a]) * 0.3),
+                    _ => mean,
+                });
+                self.confident = true;
+            }
+            _ if spread > Self::HAND_SPREAD => {}
+            None => self.bias = Some(mean),
+            Some(b) => {
+                let pull = if self.confident && !self.window_steady { Self::HAND_PULL } else { Self::ROUGH_PULL };
+                let weight = match (self.window_steady, self.confident) {
+                    (true, _) => 0.2,
+                    (false, false) => 0.25,
+                    (false, true) => 0.05,
+                };
+                if off(&b) <= pull {
+                    self.bias = Some(std::array::from_fn(|a| b[a] + (mean[a] - b[a]) * weight));
+                }
+            }
+        }
     }
 }
 
@@ -310,40 +422,156 @@ mod tests {
     }
 
     #[test]
-    fn parses_ir_and_aims() {
+    fn parses_ir() {
         // Dots at (412, 384) and (612, 384), the second pair empty, then 6 extension bytes.
         let mut r = vec![0xA1, 0x37, 0x00, 0x00, 0x80, 0x80, 0x80];
         r.extend([0x9C, 0x80, 0x56, 0x64, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
         r.extend([0; 6]);
         let Input::Data { dots, .. } = parse(&r) else { panic!("not a data report") };
         assert_eq!(dots, [(412.0, 384.0), (612.0, 384.0)]);
-
-        let mut aim = Aim::default();
-        assert_eq!(aim.update(&dots), Some((0.0, 0.0)));
-        // Only the right dot left in view: the middle is guessed from the last gap.
-        assert_eq!(aim.update(&[(662.0, 384.0)]), Some((50.0, 0.0)));
-        // Same aim (50, 0) with the remote rolled 30°: the whole picture turns with it.
-        let mut aim = Aim::default();
-        let (x, y) = aim.update(&[(468.69873, 359.0), (641.90381, 459.0)]).unwrap();
-        assert!((x - 50.0).abs() < 1e-2 && y.abs() < 1e-2, "{x} {y}");
     }
 
     #[test]
-    fn calibrates_gyro_while_still() {
-        // yaw 8100 / pitch 8200, both in slow mode, MotionPlus data bit set.
-        let sample = |yaw: u16, pitch: u16| {
-            [yaw as u8, 0, pitch as u8, ((yaw >> 8) as u8) << 2 | 0x03, 0, ((pitch >> 8) as u8) << 2 | 0x02]
-        };
-        let mut gyro = Gyro::default();
-        for _ in 0..31 {
-            assert!(gyro.update(&motion_plus(&sample(8100, 8200)).unwrap(), 0.01).is_none());
-        }
-        // The 32nd still sample sets the resting point.
-        assert_eq!(gyro.update(&motion_plus(&sample(8100, 8200)).unwrap(), 0.01), Some((0.0, 0.0)));
-        // Turning at 10°/s for 0.1 s.
-        let (yaw, pitch) = gyro.update(&motion_plus(&sample(8100 + 161, 8200)).unwrap(), 0.1).unwrap();
-        assert!((yaw - 1.0).abs() < 0.01 && pitch.abs() < 1e-6, "{yaw} {pitch}");
-        assert!(motion_plus(&[0; 6]).is_none());
+    fn an_empty_port_is_no_motion_plus_data() {
+        // What a remote sends right after the MotionPlus is switched on, before it wakes up.
+        assert!(motion_plus(&[0xFF; 6]).is_none());
         assert!(is_motion_plus(&[0x00, 0x00, 0xA6, 0x20, 0x00, 0x05]));
+        assert!(is_active_motion_plus(&[0x00, 0x00, 0xA4, 0x20, 0x04, 0x05]));
+        assert!(!is_active_motion_plus(&[0x00, 0x00, 0xA6, 0x20, 0x00, 0x05]));
+    }
+
+    #[test]
+    fn input_sizes_trim_what_windows_hands_over() {
+        assert_eq!(input_size(0x20), Some(6));
+        assert_eq!(input_size(0x37), Some(21));
+        assert_eq!(input_size(0x3F), Some(21));
+        assert_eq!(input_size(0x38), None);
+        // A status report, header included, is what parse() expects.
+        let windows = [0x20, 0x00, 0x08, 0x02, 0x00, 0x00, 0x64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let report = from_hid(&windows);
+        assert_eq!(report.len(), 8);
+        assert!(matches!(parse(&report), Input::Status { extension: true, battery: 0x64, .. }));
+    }
+
+    /// What reaches the proxy and Dolphin's bridge from a remote, and what goes to it,
+    /// has the same shape on Windows (HID device) as on Linux (L2CAP).
+    #[test]
+    fn windows_reports_have_the_l2cap_shape() {
+        use super::super::bridge::Proxy;
+        // Over L2CAP: header, id, the report's own bytes.
+        let l2cap: [Vec<u8>; 3] = [
+            vec![0xA1, 0x30, 0x00, 0x08],
+            vec![0xA1, 0x20, 0x00, 0x08, 0x02, 0x00, 0x00, 0x64],
+            [0xA1, 0x37].into_iter().chain(1..=21).collect(),
+        ];
+        for report in &l2cap {
+            // From Windows: no header, padded to 22 bytes.
+            let mut hid = report[1..].to_vec();
+            hid.resize(22, 0);
+            assert_eq!(&from_hid(&hid), report);
+            let mut proxy = Proxy::new(false, Default::default());
+            assert_eq!(proxy.from_remote(&from_hid(&hid), std::time::Instant::now()).to_game, std::slice::from_ref(report));
+        }
+        // An id the trimming doesn't know passes whole.
+        assert_eq!(from_hid(&[0x3B, 1, 2]), [0xA1, 0x3B, 1, 2]);
+        assert_eq!(from_hid(&[]), [0xA1]);
+        assert_eq!(to_hid(&leds(0)), [0x11, 0x10]);
+        assert_eq!(to_hid(&[0x11, 0x10]), [0x11, 0x10]);
+    }
+
+    #[test]
+    fn builds_memory_reads() {
+        assert_eq!(read_memory(ACCEL_CAL, 10), [0xA2, 0x17, 0x00, 0x00, 0x00, 0x16, 0x00, 0x0A]);
+    }
+
+    /// Raw [yaw, roll, pitch] and their slow flags, nothing plugged in.
+    fn ext(raw: [u16; 3], slow: [bool; 3]) -> [u8; 6] {
+        let hi = |v: u16| ((v >> 8) as u8) << 2;
+        [
+            raw[0] as u8,
+            raw[1] as u8,
+            raw[2] as u8,
+            hi(raw[0]) | (slow[0] as u8) << 1 | slow[2] as u8,
+            hi(raw[1]) | (slow[1] as u8) << 1,
+            hi(raw[2]) | 0x02,
+        ]
+    }
+
+    #[test]
+    fn decodes_three_axes_and_their_modes() {
+        // The bridge tests' "turned" fixture: yaw 0x23FF and pitch 0x2000 slow, but roll
+        // 0x0020 *fast* (byte 4 = 0x00), a value a still remote never sends.
+        let m = motion_plus(&[0xFF, 0x20, 0x00, 0x8F, 0x00, 0x82]).unwrap();
+        assert_eq!(m.raw, [0x23FF, 0x0020, 0x2000]);
+        assert_eq!(m.slow, [true, false, true]);
+        assert!(!m.extension);
+        // A real sample from today's log (RVL-CNT-01-TR, slot 1).
+        let m = motion_plus(&[0xC8, 0x84, 0x1F, 0xA7, 0xA2, 0x86]).unwrap();
+        assert_eq!(m.raw, [0x29C8, 0x2884, 0x211F]);
+        assert_eq!(m.slow, [true, true, true]);
+        assert!(motion_plus(&[0xFF; 6]).is_none());
+        assert!(motion_plus(&[0x00; 6]).is_none());
+        assert_eq!(motion_plus(&ext([8000, 8100, 8200], [true, false, true])).unwrap().raw, [8000, 8100, 8200]);
+    }
+
+    #[test]
+    fn reads_the_remotes_own_calibration() {
+        // Dolphin's emulated block: zeros 0x8000, scales 0x8000 ± 0x4400, 1200°/s and 270°/s.
+        let block = |deg: u8| {
+            let mut b = vec![0x80, 0, 0x80, 0, 0x80, 0, 0x3C, 0, 0xC4, 0, 0x3C, 0, deg, 0x0B, 0, 0];
+            b.truncate(16);
+            b
+        };
+        let bytes = [block(200), block(45)].concat();
+        let cal = GyroCal::parse(&bytes).unwrap();
+        let d = GyroCal::default();
+        for m in 0..2 {
+            for a in 0..3 {
+                assert!((cal.units[m][a] - d.units[m][a]).abs() < 1e-3);
+                assert_eq!(cal.zero[m][a], 8192.0);
+            }
+        }
+        assert!(GyroCal::parse(&[0xFF; 32]).is_none());
+        assert!(GyroCal::parse(&[0x00; 32]).is_none());
+    }
+
+    #[test]
+    fn learns_rest_on_a_table_then_measures_turns() {
+        let mut g = Gyro::default();
+        for i in 0..31 {
+            let wobble = (i % 3) as u16; // ±1–2 counts of noise
+            assert!(g.update(&motion_plus(&ext([8063 + wobble, 8190, 8210], [true; 3])).unwrap(), false).is_none());
+        }
+        assert!(g.update(&motion_plus(&ext([8064, 8190, 8210], [true; 3])).unwrap(), false).is_some());
+        // 10°/s to the right, slow mode.
+        let r = g.update(&motion_plus(&ext([8064 + 161, 8190, 8210], [true; 3])).unwrap(), false).unwrap();
+        assert!((r[YAW] - 10.0).abs() < 0.1 && r[PITCH].abs() < 0.1, "{r:?}");
+        // 500°/s in fast mode: the rest offset shrinks with the gain (8064 → 8163).
+        let fast_rest: f32 = 8192.0 + (8064.0 - 8192.0) * (4352.0 / 1200.0) / (4352.0 / 270.0);
+        let raw = (fast_rest + 500.0 * 4352.0 / 1200.0).round() as u16;
+        let r = g.update(&motion_plus(&ext([raw, 8190, 8210], [false, true, true])).unwrap(), false).unwrap();
+        assert!((r[YAW] - 500.0).abs() < 0.5, "{r:?}");
+    }
+
+    #[test]
+    fn learns_rest_in_a_hand_and_ignores_slow_turns_once_sure() {
+        let mut g = Gyro::default();
+        // Held: ±20 counts of tremor around 8100.
+        let held = |i: usize| 8100 + [0i32, 20, -20, 10, -10][i % 5];
+        for i in 0..64 {
+            g.update(&motion_plus(&ext([held(i) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        let r = g.update(&motion_plus(&ext([8100, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
+        assert!(r[YAW].abs() < 0.3, "{r:?}");
+        // On a table: sure of it now.
+        for _ in 0..32 {
+            g.update(&motion_plus(&ext([8100, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        // A slow steady turn (3°/s, +48 counts) held for seconds stays a turn.
+        for i in 0..320 {
+            g.update(&motion_plus(&ext([(held(i) + 48) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        let r = g.update(&motion_plus(&ext([8148, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
+        assert!((r[YAW] - 3.0).abs() < 0.2, "{r:?}");
     }
 }
