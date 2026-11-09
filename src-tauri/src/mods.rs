@@ -1237,6 +1237,14 @@ fn settings_xml(m: &Installed) -> Option<String> {
     ))
 }
 
+/// A path for Dolphin's descriptor, with `/` between folders on Windows too: the fork takes an XML's
+/// folder up to its last `/` (or `:`, Common/StringUtil.cpp SplitPath), so with `\` the relative
+/// `external`s of an XML (all of linked.xml's) were looked for at the drive's root and left out.
+fn dolphin_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    if cfg!(windows) { path.replace('\\', "/") } else { path.into_owned() }
+}
+
 /// Dolphin's game mod descriptor (DiscIO/GameModDescriptor.cpp in the fork).
 /// `dir`: where boot_file wrote the settings XML. `linked`: link_code's folder, last (its files are
 /// made from every mod's).
@@ -1252,14 +1260,14 @@ fn descriptor(disc: &Disc, mods: &[&Installed], dir: &Path, linked: Option<&Path
                     let choice = s.choice(*m.values.get(&s.id)?);
                     (choice > 0).then(|| option(&binding.section, &binding.option, choice))
                 });
-                json!({ "xml": m.dir.join(&p.xml), "root": m.dir, "options": fixed.chain(chosen).collect::<Vec<_>>() })
+                json!({ "xml": dolphin_path(&m.dir.join(&p.xml)), "root": dolphin_path(&m.dir), "options": fixed.chain(chosen).collect::<Vec<_>>() })
             });
             let memory = settings_xml(m)
-                .map(|_| json!({ "xml": settings_file(dir, m), "root": m.dir, "options": [option(SETTINGS_SECTION, SETTINGS_OPTION, 1)] }));
-            let files = files_xml(m).map(|_| json!({ "xml": files_file(dir, m), "root": m.dir, "options": [option(SETTINGS_SECTION, FILES_OPTION, 1)] }));
+                .map(|_| json!({ "xml": dolphin_path(&settings_file(dir, m)), "root": dolphin_path(&m.dir), "options": [option(SETTINGS_SECTION, SETTINGS_OPTION, 1)] }));
+            let files = files_xml(m).map(|_| json!({ "xml": dolphin_path(&files_file(dir, m)), "root": dolphin_path(&m.dir), "options": [option(SETTINGS_SECTION, FILES_OPTION, 1)] }));
             own.chain(memory).chain(files)
         })
-        .chain(linked.map(|l| json!({ "xml": l.join("linked.xml"), "root": l, "options": [option(SETTINGS_SECTION, CODE_OPTION, 1)] })))
+        .chain(linked.map(|l| json!({ "xml": dolphin_path(&l.join("linked.xml")), "root": dolphin_path(l), "options": [option(SETTINGS_SECTION, CODE_OPTION, 1)] })))
         .collect();
     json!({
         "type": "dolphin-game-mod-descriptor",
