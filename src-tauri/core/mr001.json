@@ -249,6 +249,12 @@
    "doc": "d\u00e9but du tour d'un joueur (apr\u00e8s le bandeau \u00ab tour \u00bb)"
   },
   {
+   "name": "Island_turnEnd",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin du tour d'un joueur (d\u00e9placement et \u00e9v\u00e9nements finis)"
+  },
+  {
    "name": "Island_cameraPitch",
    "kind": "void",
    "exclusive": false,
