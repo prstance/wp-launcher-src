@@ -7,7 +7,10 @@ mod protocol;
 #[cfg(target_os = "linux")]
 #[path = "linux.rs"]
 mod transport;
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+#[path = "windows.rs"]
+mod transport;
+#[cfg(not(any(target_os = "linux", windows)))]
 #[path = "unsupported.rs"]
 mod transport;
 
@@ -37,7 +40,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// Why Bluetooth can't be used (what transports report from `open`).
 pub enum Availability {
     NoAdapter,
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    #[cfg_attr(any(target_os = "linux", windows), allow(dead_code))]
     Unsupported,
     Error(String),
 }
@@ -132,7 +135,7 @@ impl Wiimotes {
     }
 
     /// Whether someone can play: a remote is connected. Where the launcher can't
-    /// connect any yet (Windows, macOS), only Dolphin can tell, so this says yes.
+    /// connect any yet (macOS), only Dolphin can tell, so this says yes.
     pub async fn has_player(&self) -> bool {
         let (tx, rx) = oneshot::channel();
         if self.0.send(Msg::Get(tx)).is_err() {
@@ -229,6 +232,9 @@ struct Manager {
     paused: bool,
     /// In game: looking for one more player, at the user's request.
     joining: bool,
+    /// In game without the bridge (Windows): Dolphin opens the remotes itself, the
+    /// launcher keeps their links but leaves them alone.
+    shared: bool,
     /// Remotes in the game, and where one that drops out belongs.
     players: usize,
     places: HashMap<String, usize>,
@@ -253,6 +259,7 @@ impl Manager {
             scanning: false,
             paused: false,
             joining: false,
+            shared: false,
             players: 0,
             places: HashMap::new(),
             listener: None,
@@ -307,12 +314,22 @@ impl Manager {
                 let _ = app.emit(POINTER_EVENT, PointerEvent { dots: Vec::new(), aim: None, turn: None });
                 let supported = !matches!(self.bt, Err(Availability::Unsupported));
                 self.listener = if supported { listen(self.tx.clone()) } else { None };
+                self.shared = self.listener.is_none();
                 let _ = reply.send(self.listener.as_ref().map(|(path, _)| path.clone()));
             }
             Msg::TakeBack => {
                 self.paused = false;
                 self.joining = false;
                 self.places.clear();
+                // Dolphin set the remotes up its own way.
+                if std::mem::take(&mut self.shared) {
+                    for (slot, r) in self.slots.iter_mut().enumerate() {
+                        let Some(r) = r else { continue };
+                        (r.motion_plus, r.extension) = (MotionPlusState::Probing, None);
+                        (r.aim, r.gyro, r.turn) = Default::default();
+                        spawn(set_up(r.link.clone(), slot, true));
+                    }
+                }
                 if let Some((path, task)) = self.listener.take() {
                     task.abort();
                     let _ = std::fs::remove_file(path);
@@ -355,7 +372,8 @@ impl Manager {
                 }
             }
             Msg::Move(from, to) => {
-                if from < SLOTS && to < SLOTS && from != to {
+                // Dolphin numbers the remotes it opened itself.
+                if from < SLOTS && to < SLOTS && from != to && !self.shared {
                     self.slots.swap(from, to);
                     for slot in [from, to] {
                         // In game, a socket is one player: Dolphin asks again for both.
@@ -383,7 +401,9 @@ impl Manager {
                     }
                 }
             }
-            Msg::Input { id, report } => self.input(id, &report).await,
+            // Answering the reports the game asked for would get in its way.
+            Msg::Input { id, report } if !self.shared => self.input(id, &report).await,
+            Msg::Input { .. } => {}
             Msg::Lost { id } => {
                 for (i, slot) in self.slots.iter_mut().enumerate() {
                     if slot.as_ref().is_some_and(|r| r.id == id) {
@@ -410,7 +430,7 @@ impl Manager {
         self.powered = bt.powered().await;
         // Discovery slows Bluetooth down: in game, only to find a remote that dropped out or a new player.
         let filled = self.slots.iter().flatten().count();
-        let looking = if self.paused { self.joining || filled < self.players } else { self.scanning };
+        let looking = if self.paused { !self.shared && (self.joining || filled < self.players) } else { self.scanning };
         if !self.powered || !looking {
             self.discovery = None;
         } else if self.discovery.is_none() {
@@ -447,7 +467,7 @@ impl Manager {
         }
 
         // A remote lent to the game answers the game's own status requests.
-        for r in self.slots.iter_mut().flatten().filter(|r| r.serving.is_none()) {
+        for r in self.slots.iter_mut().flatten().filter(|r| r.serving.is_none() && !self.shared) {
             if r.last_status.elapsed() >= BATTERY_EVERY {
                 r.last_status = Instant::now();
                 let _ = r.link.send(&protocol::status_request()).await;
