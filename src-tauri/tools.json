@@ -1,22 +1,22 @@
 {
   "dolphin": {
     "name": "Dolphin",
-    "version": "2609a-4",
+    "version": "2609a-5",
     "linux": {
-      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-4/dolphin-wp-linux-x86_64.tar.gz",
-      "sha256": "0caf11cc6384e0a217dd720328a9481c63c6ed01105517f8eff92ddf70390e59",
+      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-5/dolphin-wp-linux-x86_64.tar.gz",
+      "sha256": "fab1b876e50c9d9a1367806f557d31ef408cdc32882adad94d921d5aaa808dc8",
       "bin": "usr/bin/dolphin-emu",
       "tool": "usr/bin/dolphin-tool"
     },
     "windows": {
-      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-4/dolphin-wp-windows-x64.zip",
-      "sha256": "3fdbc4fd229864dfdeb21b2ba636ff8e3638b23620a47a870e480aaf8ce98a37",
+      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-5/dolphin-wp-windows-x64.zip",
+      "sha256": "32392b31290b964d5a289dedc1ebf34cb17d52447102fcf87e3080f44f88c558",
       "bin": "Dolphin/Dolphin.exe",
       "tool": "Dolphin/DolphinTool.exe"
     },
     "macos": {
-      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-3/dolphin-wp-macos-arm64.tar.gz",
-      "sha256": "e4bb28e350acf709a37970cf2d4b2cc8154e1e0310ac7b294aadf7810887cca6",
+      "url": "https://github.com/prstance/wp-dolphin/releases/download/wp-2609a-5/dolphin-wp-macos-arm64.tar.gz",
+      "sha256": "995c1c6394f68654ab53c0173b7df8a30f07e275316bcd05f54ebbcf299be7b7",
       "bin": "Dolphin.app/Contents/MacOS/Dolphin",
       "tool": "dolphin-tool"
     }
