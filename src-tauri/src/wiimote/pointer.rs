@@ -38,9 +38,6 @@ const BAR_TRUST: Duration = Duration::from_millis(1500);
 const BLEND_TAU: f32 = 0.15;
 /// Tilt pointer (no gyroscope, no bar): degrees of twist and of pitch to an edge.
 const TILT_SPAN: (f32, f32) = (30.0, 25.0);
-/// +1 if a rolled remote's gyroscope axes map to the screen as derived from the
-/// accelerometer axes the twist test pins down; -1 flips it (see the hardware check).
-const TWIST_SIGN: f32 = 1.0;
 /// After the bar, the dots' lean eases from the bar's own to gravity's over about this (s).
 const TWIST_EASE: f32 = 0.5;
 
@@ -151,6 +148,8 @@ pub struct Pointer {
     steady_at: Option<(f32, f32)>,
     tilt_zero: Option<f32>,
     last: Option<Instant>,
+    /// The last report's gyroscope rates (°/s yaw roll pitch), for the trace.
+    rate: Option<[f32; 3]>,
 }
 
 impl Default for Pointer {
@@ -175,6 +174,7 @@ impl Default for Pointer {
             steady_at: None,
             tilt_zero: None,
             last: None,
+            rate: None,
         }
     }
 }
@@ -268,6 +268,13 @@ impl Pointer {
 
     /// One report's worth: visible dots (camera px), raw accelerometer, MotionPlus sample.
     pub fn update(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
+        let seen = self.step(dots, accel, motion, now);
+        #[cfg(all(debug_assertions, not(test)))]
+        trace::line(self, dots, accel, motion, &seen, now);
+        seen
+    }
+
+    fn step(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
         let dt = self.last.map_or(0.01, |t| now.saturating_duration_since(t).as_secs_f32().min(0.1));
         self.last = Some(now);
 
@@ -278,7 +285,8 @@ impl Pointer {
         if across > 0.5 {
             self.twist = a[0].atan2(a[2]);
         }
-        let tilt_up = a[1].atan2(across).to_degrees();
+        // Raising the nose lowers y (checked against the gyroscope on a real remote).
+        let tilt_up = (-a[1]).atan2(across).to_degrees();
 
         // Real bar.
         let mut pair = self.pick(dots, level, now);
@@ -306,9 +314,15 @@ impl Pointer {
         };
 
         // Gyroscope: turns about the screen's vertical and horizontal, roll taken out.
-        let turn = motion.and_then(|m| self.gyro.update(m, steady)).map(|r| {
-            let (s, c) = (TWIST_SIGN * self.twist).sin_cos();
-            let (right, up) = (r[YAW] * c - r[PITCH] * s, r[PITCH] * c + r[YAW] * s);
+        // The gyroscope turns about the accelerometer's axes: pitch about x, yaw about z,
+        // both counted the same way (Dolphin's MotionPlus.cpp, sign_fix -1 +1 -1); held
+        // level, + yaw turns right and + pitch raises the nose (checked on a real remote).
+        // Twisted by t, gravity is (sin t, ·, cos t) in x and z: a turn about it shows as
+        // yaw·cos t + pitch·sin t, one about the horizontal as pitch·cos t − yaw·sin t.
+        self.rate = motion.and_then(|m| self.gyro.update(m, steady));
+        let turn = self.rate.map(|r| {
+            let (s, c) = self.twist.sin_cos();
+            let (right, up) = (r[YAW] * c + r[PITCH] * s, r[PITCH] * c - r[YAW] * s);
             let m2 = right * right + up * up;
             let k = m2 / (m2 + DEADZONE * DEADZONE);
             let mut dv = up * k * dt;
@@ -387,6 +401,69 @@ impl Pointer {
         }
         self.tilt_zero = None;
         Seen { pos: None, source: None, game: ForGame::Nothing }
+    }
+}
+
+/// Development builds: each report's inputs and pointer, one line each, in
+/// <temp dir>/wp-wiimote-trace.log (emptied when the launcher starts), to tune on real
+/// remotes: `tail -f /tmp/wp-wiimote-trace.log`.
+#[cfg(all(debug_assertions, not(test)))]
+mod trace {
+    use super::{ForGame, MotionPlus, Pointer, Seen};
+    use std::fs::File;
+    use std::io::{BufWriter, Write};
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static OUT: Mutex<Option<(BufWriter<File>, Instant, u32)>> = Mutex::new(None);
+
+    pub fn line(p: &Pointer, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, seen: &Seen, now: Instant) {
+        let Ok(mut out) = OUT.lock() else { return };
+        if out.is_none() {
+            let Ok(file) = File::create(std::env::temp_dir().join("wp-wiimote-trace.log")) else { return };
+            *out = Some((BufWriter::new(file), now, 0));
+        }
+        let Some((file, start, lines)) = out.as_mut() else { return };
+        let mut l = format!("{:9.3} dots={}", now.saturating_duration_since(*start).as_secs_f32(), dots.len());
+        for d in dots {
+            l += &format!(" ({:.0},{:.0})", d.0, d.1);
+        }
+        l += &format!(" acc={},{},{} twist={:+.1}", accel[0], accel[1], accel[2], p.twist.to_degrees());
+        match motion {
+            Some(m) => {
+                let mode = |i: usize| if m.slow[i] { 's' } else { 'F' };
+                l += &format!(" mp={}{},{}{},{}{}", m.raw[0], mode(0), m.raw[1], mode(1), m.raw[2], mode(2));
+            }
+            None => l += " mp=-",
+        }
+        if let Some(r) = p.rate {
+            l += &format!(" rate={:+.2},{:+.2},{:+.2}", r[0], r[1], r[2]);
+        }
+        match p.gyro.rest() {
+            (Some(b), sure) => l += &format!(" rest={:.1},{:.1},{:.1}{}", b[0], b[1], b[2], if sure { "T" } else { "H" }),
+            (None, _) => l += " rest=-",
+        }
+        if let Some(pitch) = p.pitch {
+            l += &format!(" pitch={pitch:+.1}");
+        }
+        l += &format!(" src={}", seen.source.map_or("-", |s| s.name()));
+        if let Some((x, y)) = seen.pos {
+            l += &format!(" pos={x:+.3},{y:+.3}");
+        }
+        match seen.game {
+            ForGame::Real => l += " game=real",
+            ForGame::Dots(d, size) => l += &format!(" game=({},{})({},{})s{size}", d[0].0, d[0].1, d[1].0, d[1].1),
+            ForGame::Nothing => l += " game=-",
+        }
+        if *lines % 500 == 0 {
+            let c = &p.gyro.cal;
+            let _ = writeln!(file, "# MotionPlus calibration: rest slow {:?} fast {:?}, units/°/s slow {:?}", c.zero[1], c.zero[0], c.units[1]);
+        }
+        let _ = writeln!(file, "{l}");
+        *lines += 1;
+        if *lines % 25 == 0 {
+            let _ = file.flush();
+        }
     }
 }
 
@@ -558,13 +635,78 @@ mod tests {
             p.update(&[], rolled, Some(&mp([8192; 3])), now);
         }
         let start = p.pos.unwrap();
-        // The turn shows on the pitch gyroscope now (sign per TWIST_SIGN).
+        // The turn shows on the pitch gyroscope now (twist +90°: + pitch is right).
         for _ in 0..20 {
             now += Duration::from_millis(10);
-            p.update(&[], rolled, Some(&mp([8192, 8192, 8192 - 161])), now);
+            p.update(&[], rolled, Some(&mp([8192, 8192, 8192 + 161])), now);
         }
         let end = p.pos.unwrap();
         assert!(end.0 - start.0 > 0.05 && (end.1 - start.1).abs() < 0.02, "{start:?} {end:?}");
+    }
+
+    /// A MotionPlus sample for an angular velocity (°/s) about the accelerometer's x y z,
+    /// as a real one gives it (Dolphin's MotionPlus.cpp: pitch and yaw counted against
+    /// that frame's right-hand rule): independent of how the pointer reads it.
+    fn mp_for(w: [f32; 3]) -> MotionPlus {
+        let raw = |rate: f32| (8192.0 + rate * 4352.0 / 270.0).round() as u16;
+        mp([raw(-w[2]), raw(w[1]), raw(-w[0])])
+    }
+
+    #[test]
+    fn a_remote_held_twisted_goes_where_it_turns() {
+        for deg in [-30.0f32, 15.0, 25.0, 45.0] {
+            let (s, c) = deg.to_radians().sin_cos();
+            // Gravity u = (sin t, 0, cos t); across the remote h = (cos t, 0, -sin t). Turning
+            // right spins about −u (+ yaw, level), raising the nose about −h (+ pitch, level:
+            // measured on a real remote).
+            let held = [(512.0 + 104.0 * s).round() as u16, 512, (512.0 + 104.0 * c).round() as u16];
+            let turn = |right: f32, up: f32| mp_for([-right * s - up * c, 0.0, -right * c + up * s]);
+            let mut now = Instant::now();
+            let mut p = Pointer::default();
+            for _ in 0..40 {
+                now += Duration::from_millis(10);
+                p.update(&[], held, Some(&turn(0.0, 0.0)), now);
+            }
+            let moved = |p: &mut Pointer, now: &mut Instant, right: f32, up: f32| {
+                let a = p.pos.unwrap();
+                for _ in 0..30 {
+                    *now += Duration::from_millis(10);
+                    p.update(&[], held, Some(&turn(right, up)), *now);
+                }
+                let b = p.pos.unwrap();
+                (b.0 - a.0, b.1 - a.1)
+            };
+            let (dx, dy) = moved(&mut p, &mut now, 20.0, 0.0);
+            assert!(dx > 0.25 && dy.abs() < 0.1 * dx, "{deg}° right: {dx} {dy}");
+            let (dx, dy) = moved(&mut p, &mut now, 0.0, 20.0);
+            assert!(dy < -0.1 && dx.abs() < 0.1 * -dy, "{deg}° up: {dx} {dy}");
+        }
+    }
+
+    #[test]
+    fn raising_the_nose_moves_up_and_gravity_agrees() {
+        let mut now = Instant::now();
+        let mut p = calibrated(&mut now);
+        // The accelerometer of a remote raised by `deg`: y goes down (measured).
+        let raised = |deg: f32| {
+            let (s, c) = deg.to_radians().sin_cos();
+            [512, (512.0 - 104.0 * s).round() as u16, (512.0 + 104.0 * c).round() as u16]
+        };
+        let start = p.pos.unwrap().1;
+        // 10° up in half a second, + pitch (measured).
+        for i in 0..50 {
+            now += Duration::from_millis(10);
+            p.update(&[], raised(i as f32 * 0.2), Some(&mp_for([-20.0, 0.0, 0.0])), now);
+        }
+        let up = p.pos.unwrap().1;
+        assert!(up < start - 0.3, "{start} {up}");
+        // Held there: gravity says the same, nothing slides back.
+        for _ in 0..300 {
+            now += Duration::from_millis(10);
+            p.update(&[], raised(10.0), Some(&mp_for([0.0; 3])), now);
+        }
+        let held = p.pos.unwrap().1;
+        assert!((held - up).abs() < 0.05, "{up} {held}");
     }
 
     #[test]

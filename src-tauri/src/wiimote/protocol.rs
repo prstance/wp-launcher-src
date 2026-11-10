@@ -261,6 +261,9 @@ pub struct Gyro {
     window: Vec<[f32; 3]>,
     /// Every sample of the window had the bar saying the remote wasn't turning.
     window_steady: bool,
+    /// In-hand windows in a row that agree (sum of their means, how many): a slow turn
+    /// looks still for a moment, only seconds of it make a rest value.
+    still: Option<([f32; 3], u32)>,
 }
 
 impl Gyro {
@@ -273,10 +276,20 @@ impl Gyro {
     /// steady turn mustn't become the rest value.
     const HAND_PULL: f32 = 24.0;
     const ROUGH_PULL: f32 = 160.0;
+    /// In-hand windows that must agree, within this, before they move the rest value:
+    /// Dolphin's 3 s calibration period within its dead zone (IMUGyroscope.cpp).
+    const HAND_STILL: u32 = 10;
+    const HAND_AGREE: f32 = 16.0;
 
     #[cfg_attr(not(unix), allow(dead_code))]
     pub fn ready(&self) -> bool {
         self.bias.is_some()
+    }
+
+    /// The rest values (raw, slow) and whether a table set them: for the trace.
+    #[cfg(all(debug_assertions, not(test)))]
+    pub fn rest(&self) -> (Option<[f32; 3]>, bool) {
+        (self.bias, self.confident)
     }
 
     /// Degrees/second [yaw, roll, pitch] (None until a rest value is known).
@@ -301,6 +314,7 @@ impl Gyro {
     fn learn(&mut self, m: &MotionPlus, steady: bool) {
         if !m.slow.iter().all(|&s| s) {
             self.window.clear();
+            self.still = None;
             return;
         }
         if self.window.is_empty() {
@@ -316,6 +330,16 @@ impl Gyro {
         let spread = self.window.iter().flat_map(|s| (0..3).map(move |a| (s[a] - mean[a]).abs())).fold(0f32, f32::max);
         self.window.clear();
         let off = |b: &[f32; 3]| (0..3).map(|a| (mean[a] - b[a]).abs()).fold(0f32, f32::max);
+        if spread > Self::TABLE_SPREAD && spread <= Self::HAND_SPREAD && !self.window_steady {
+            // In a hand, nothing else saying it's still: count it towards a still spell.
+            let (sum, n) = match self.still {
+                Some((sum, n)) if off(&sum.map(|v| v / n as f32)) <= Self::HAND_AGREE => (sum, n),
+                _ => ([0.0; 3], 0),
+            };
+            self.still = Some((std::array::from_fn(|a| sum[a] + mean[a]), n + 1));
+        } else {
+            self.still = None;
+        }
         match self.bias {
             _ if spread <= Self::TABLE_SPREAD => {
                 self.bias = Some(match (self.bias, self.confident) {
@@ -325,16 +349,21 @@ impl Gyro {
                 self.confident = true;
             }
             _ if spread > Self::HAND_SPREAD => {}
+            // Nothing better yet (as Dolphin, which starts from the first sample).
             None => self.bias = Some(mean),
+            // The bar said the remote wasn't turning: as good as a table, roughly.
+            Some(b) if self.window_steady => {
+                if off(&b) <= Self::ROUGH_PULL {
+                    self.bias = Some(std::array::from_fn(|a| b[a] + (mean[a] - b[a]) * 0.2));
+                }
+            }
             Some(b) => {
-                let pull = if self.confident && !self.window_steady { Self::HAND_PULL } else { Self::ROUGH_PULL };
-                let weight = match (self.window_steady, self.confident) {
-                    (true, _) => 0.2,
-                    (false, false) => 0.25,
-                    (false, true) => 0.05,
-                };
+                let Some((sum, n)) = self.still.filter(|&(_, n)| n >= Self::HAND_STILL) else { return };
+                self.still = None;
+                let spell = sum.map(|v| v / n as f32);
+                let (pull, weight) = if self.confident { (Self::HAND_PULL, 0.25) } else { (Self::ROUGH_PULL, 0.7) };
                 if off(&b) <= pull {
-                    self.bias = Some(std::array::from_fn(|a| b[a] + (mean[a] - b[a]) * weight));
+                    self.bias = Some(std::array::from_fn(|a| b[a] + (spell[a] - b[a]) * weight));
                 }
             }
         }
@@ -573,5 +602,37 @@ mod tests {
         }
         let r = g.update(&motion_plus(&ext([8148, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
         assert!((r[YAW] - 3.0).abs() < 0.2, "{r:?}");
+    }
+
+    #[test]
+    fn a_slow_turn_in_a_hand_never_set_down_stays_a_turn() {
+        let mut g = Gyro::default();
+        let held = |i: usize| 8100 + [0i32, 20, -20, 10, -10][i % 5];
+        for i in 0..64 {
+            g.update(&motion_plus(&ext([held(i) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        // A slow steady turn (3°/s) for a second, as when easing onto a button.
+        for i in 0..100 {
+            g.update(&motion_plus(&ext([(held(i) + 48) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        // Still again: still, no drift back.
+        let r = g.update(&motion_plus(&ext([8100, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
+        assert!(r[YAW].abs() < 0.3, "{r:?}");
+    }
+
+    #[test]
+    fn a_hand_held_still_for_seconds_corrects_the_rest_value() {
+        let mut g = Gyro::default();
+        let held = |i: usize| 8100 + [0i32, 20, -20, 10, -10][i % 5];
+        for i in 0..32 {
+            g.update(&motion_plus(&ext([held(i) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        // The rest value warms up by 2°/s: once held still that way for a few seconds,
+        // it is the new rest value.
+        for i in 0..800 {
+            g.update(&motion_plus(&ext([(held(i) + 32) as u16, 8192, 8192], [true; 3])).unwrap(), false);
+        }
+        let r = g.update(&motion_plus(&ext([8132, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
+        assert!(r[YAW].abs() < 0.5, "{r:?}");
     }
 }
