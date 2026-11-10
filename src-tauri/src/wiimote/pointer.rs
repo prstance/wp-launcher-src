@@ -21,6 +21,11 @@ const SPACING_RANGE: (f32, f32) = (40.0, 420.0);
 const MAX_LEAN: f32 = 25.0;
 /// Frames a new pair must hold before it counts as the bar.
 const ACQUIRE: u8 = 3;
+/// Followed this long, the bar is there: from then on it alone points, as on a Wii, and
+/// the MotionPlus not at all (the two are never mixed).
+const BAR_CONFIRM: Duration = Duration::from_millis(500);
+/// Not seen this long, the bar is taken as gone: the MotionPlus points again.
+const BAR_GONE: Duration = Duration::from_secs(30);
 /// How long one dot keeps a bar going, and how far it may be from where one was.
 const ONE_DOT_FOR: Duration = Duration::from_secs(1);
 const ONE_DOT_REACH: f32 = 60.0;
@@ -30,16 +35,8 @@ const GYRO_SPAN: (f32, f32) = (36.0, 36.0 * REACH.1 / REACH.0);
 const DEADZONE: f32 = 0.8;
 /// Gravity pulls the gyroscope's vertical angle back within about this time (s).
 const PITCH_TAU: f32 = 1.0;
-/// While a real bar is in use the pointer may leave the screen this far (as a real one
-/// would); pointing at the screen this long without seeing it means it is gone.
-const OFF_SCREEN: f32 = 1.6;
-const BAR_TRUST: Duration = Duration::from_millis(1500);
-/// Gyro-to-bar differences fade over this time (s) instead of jumping.
-const BLEND_TAU: f32 = 0.15;
 /// Tilt pointer (no gyroscope, no bar): degrees of twist and of pitch to an edge.
 const TILT_SPAN: (f32, f32) = (30.0, 25.0);
-/// After the bar, the dots' lean eases from the bar's own to gravity's over about this (s).
-const TWIST_EASE: f32 = 0.5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AccelCal {
@@ -130,21 +127,16 @@ pub struct Pointer {
     /// Plain remotes without a bar point by tilting.
     pub tilt: bool,
     twist: f32,
-    /// The real bar's lean minus gravity's, fading once the bar is gone.
-    twist_offset: f32,
     pitch: Option<f32>,
     pair: Option<Pair>,
-    /// The last report's pointer came from the bar.
-    on_bar: bool,
     candidate: Option<(Pair, u8)>,
     spacing: f32,
+    /// Since when the bar has been followed without a break.
+    bar_since: Option<Instant>,
     bar_seen: Option<Instant>,
-    /// A real bar is in use: the pointer may leave the screen.
+    /// There is a bar: it alone points.
     bar_mode: bool,
-    /// Said in the log that the bar was found, until it has been gone a while.
-    bar_logged: bool,
     pos: Option<(f32, f32)>,
-    blend: (f32, f32),
     steady_at: Option<(f32, f32)>,
     tilt_zero: Option<f32>,
     last: Option<Instant>,
@@ -160,17 +152,14 @@ impl Default for Pointer {
             bar_top: true,
             tilt: false,
             twist: 0.0,
-            twist_offset: 0.0,
             pitch: None,
             pair: None,
-            on_bar: false,
             candidate: None,
             spacing: SPACING,
+            bar_since: None,
             bar_seen: None,
             bar_mode: false,
-            bar_logged: false,
             pos: None,
-            blend: (0.0, 0.0),
             steady_at: None,
             tilt_zero: None,
             last: None,
@@ -313,13 +302,42 @@ impl Pointer {
             }
         };
 
-        // Gyroscope: turns about the screen's vertical and horizontal, roll taken out.
-        // The gyroscope turns about the accelerometer's axes: pitch about x, yaw about z,
+        // Still learning its rest value while the bar points.
+        self.rate = motion.and_then(|m| self.gyro.update(m, steady));
+
+        if let Some(p) = pair {
+            let spacing = 2.0 * p.half.0.hypot(p.half.1);
+            self.spacing = if self.bar_since.is_none() { spacing } else { self.spacing + (spacing - self.spacing) * 0.2 };
+            self.pair = Some(Pair { at: if dots.len() >= 2 { now } else { p.at }, ..p });
+            self.bar_seen = Some(now);
+            let since = *self.bar_since.get_or_insert(now);
+            if !self.bar_mode && now.duration_since(since) >= BAR_CONFIRM {
+                self.bar_mode = true;
+                eprintln!("wiimote: sensor bar found, it alone points now");
+            }
+        } else {
+            self.bar_since = None;
+            if self.pair.is_some_and(|p| now.duration_since(p.at) > ONE_DOT_FOR) {
+                self.pair = None;
+            }
+        }
+        if self.bar_mode && self.bar_seen.is_some_and(|t| now.duration_since(t) > BAR_GONE) {
+            self.bar_mode = false;
+            self.pitch = None;
+            eprintln!("wiimote: no sensor bar for {} s, the MotionPlus points again", BAR_GONE.as_secs());
+        }
+        if self.bar_mode {
+            // As on a Wii: the game sees what the camera sees, and no pointer without the bar.
+            self.pos = bar_pos;
+            return Seen { pos: bar_pos, source: bar_pos.map(|_| Source::Bar), game: ForGame::Real };
+        }
+
+        // No bar: the gyroscope, turns about the screen's vertical and horizontal, roll
+        // taken out. It turns about the accelerometer's axes: pitch about x, yaw about z,
         // both counted the same way (Dolphin's MotionPlus.cpp, sign_fix -1 +1 -1); held
         // level, + yaw turns right and + pitch raises the nose (checked on a real remote).
         // Twisted by t, gravity is (sin t, ·, cos t) in x and z: a turn about it shows as
         // yaw·cos t + pitch·sin t, one about the horizontal as pitch·cos t − yaw·sin t.
-        self.rate = motion.and_then(|m| self.gyro.update(m, steady));
         let turn = self.rate.map(|r| {
             let (s, c) = self.twist.sin_cos();
             let (right, up) = (r[YAW] * c + r[PITCH] * s, r[PITCH] * c - r[YAW] * s);
@@ -337,60 +355,14 @@ impl Pointer {
             (right * k * dt * 2.0 / GYRO_SPAN.0, -dv * 2.0 / GYRO_SPAN.1)
         });
 
-        if let (Some(p), Some(pos)) = (pair, bar_pos) {
-            if !self.on_bar {
-                // Back to the bar: the gyroscope's pointer fades into it.
-                if let Some(old) = self.pos.filter(|_| self.bar_seen.is_some()) {
-                    self.blend = (old.0 - pos.0, old.1 - pos.1);
-                }
-            }
-            let spacing = 2.0 * p.half.0.hypot(p.half.1);
-            self.spacing = if !self.on_bar { spacing } else { self.spacing + (spacing - self.spacing) * 0.2 };
-            self.pair = Some(Pair { at: if dots.len() >= 2 { now } else { p.at }, ..p });
-            self.bar_seen = Some(now);
-            self.bar_mode = true;
-            self.on_bar = true;
-            if !std::mem::replace(&mut self.bar_logged, true) {
-                eprintln!("wiimote: sensor bar found");
-            }
-            let lean = p.half.1.atan2(p.half.0) - self.twist;
-            self.twist_offset = (lean + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-            let fade = (-dt / BLEND_TAU).exp();
-            self.blend = (self.blend.0 * fade, self.blend.1 * fade);
-            let shown = (pos.0 + self.blend.0, pos.1 + self.blend.1);
-            self.pos = Some(shown);
-            let real = self.blend.0.hypot(self.blend.1) < 0.01 && dots.len() == 2;
-            let game = if real { ForGame::Real } else { ForGame::Dots(self.dots_for(shown, self.spacing, self.twist + self.twist_offset), Self::dot_size(self.spacing)) };
-            return Seen { pos: Some(shown), source: Some(Source::Bar), game };
-        }
-        self.on_bar = false;
-        // The lean the bar had, easing towards gravity's.
-        let twist = self.twist + self.twist_offset;
-        self.twist_offset *= (-dt / TWIST_EASE).exp();
-        if self.pair.is_some_and(|p| now.duration_since(p.at) > ONE_DOT_FOR) {
-            self.pair = None;
-        }
-        if self.bar_logged && self.bar_seen.is_some_and(|t| now.duration_since(t) > BAR_TRUST) {
-            self.bar_logged = false;
-            eprintln!("wiimote: sensor bar lost");
-        }
-
         if let Some((dx, dy)) = turn {
             let (x, y) = self.pos.unwrap_or((0.0, 0.0));
-            let (x, y) = (x + dx, y + dy);
-            // Pointing at the screen with no bar in sight for a while: there is none.
-            let on_screen = x.abs() < 0.9 && y.abs() < 0.9;
-            if self.bar_mode && on_screen && self.bar_seen.is_none_or(|t| now.duration_since(t) > BAR_TRUST) {
-                self.bar_mode = false;
-            }
-            let limit = if self.bar_mode { OFF_SCREEN } else { 1.0 };
-            let pos = (x.clamp(-limit, limit), y.clamp(-limit, limit));
+            let pos = ((x + dx).clamp(-1.0, 1.0), (y + dy).clamp(-1.0, 1.0));
             self.pos = Some(pos);
-            self.blend = (0.0, 0.0);
-            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: ForGame::Dots(self.dots_for(pos, self.spacing, twist), Self::dot_size(self.spacing)) };
+            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: ForGame::Dots(self.dots_for(pos, self.spacing, self.twist), Self::dot_size(self.spacing)) };
         }
 
-        if self.tilt && motion.is_none() && self.bar_seen.is_none_or(|t| now.duration_since(t) > BAR_TRUST) {
+        if self.tilt && motion.is_none() {
             let zero = *self.tilt_zero.get_or_insert(tilt_up);
             let pos = (
                 (self.twist.to_degrees() / TILT_SPAN.0).clamp(-1.0, 1.0),
@@ -446,7 +418,7 @@ mod trace {
         if let Some(pitch) = p.pitch {
             l += &format!(" pitch={pitch:+.1}");
         }
-        l += &format!(" src={}", seen.source.map_or("-", |s| s.name()));
+        l += &format!(" mode={} src={}", if p.bar_mode { "bar" } else { "motion" }, seen.source.map_or("-", |s| s.name()));
         if let Some((x, y)) = seen.pos {
             l += &format!(" pos={x:+.3},{y:+.3}");
         }
@@ -529,13 +501,23 @@ mod tests {
         }
     }
 
+    const BAR: [(f32, f32); 2] = [(442.0, 452.0), (582.0, 452.0)];
+
+    /// Followed long enough to be taken as there.
+    fn see_bar(p: &mut Pointer, now: &mut Instant, motion: Option<&MotionPlus>) {
+        for _ in 0..60 {
+            *now += Duration::from_millis(10);
+            p.update(&BAR, LEVEL, motion, *now);
+        }
+    }
+
     #[test]
-    fn a_pair_needs_a_few_frames_and_the_right_lean() {
+    fn a_pair_needs_half_a_second_and_the_right_lean() {
         let mut now = Instant::now();
         let mut p = Pointer::default();
-        let bar = [(442.0, 452.0), (582.0, 452.0)];
-        let seen: Vec<_> = (0..3).map(|_| { now += Duration::from_millis(10); p.update(&bar, LEVEL, None, now).source }).collect();
-        assert_eq!(seen, [None, None, Some(Source::Bar)]);
+        let seen: Vec<_> = (0..60).map(|_| { now += Duration::from_millis(10); p.update(&BAR, LEVEL, None, now).source }).collect();
+        assert!(seen[..48].iter().all(Option::is_none), "{seen:?}");
+        assert_eq!(seen[59], Some(Source::Bar));
         // Two lamps one above the other (90° off what gravity says): no bar.
         let mut q = Pointer::default();
         for _ in 0..10 {
@@ -553,10 +535,7 @@ mod tests {
     fn one_dot_carries_a_bar_briefly_and_only_where_a_dot_was() {
         let mut now = Instant::now();
         let mut p = Pointer::default();
-        for _ in 0..3 {
-            now += Duration::from_millis(10);
-            p.update(&[(442.0, 452.0), (582.0, 452.0)], LEVEL, None, now);
-        }
+        see_bar(&mut p, &mut now, None);
         now += Duration::from_millis(10);
         let seen = p.update(&[(592.0, 452.0)], LEVEL, None, now);
         assert_eq!(seen.source, Some(Source::Bar));
@@ -567,10 +546,7 @@ mod tests {
         assert_eq!(p.update(&[(100.0, 100.0)], LEVEL, None, now).source, None);
         // Nor after a second alone.
         let mut q = Pointer::default();
-        for _ in 0..3 {
-            now += Duration::from_millis(10);
-            q.update(&[(442.0, 452.0), (582.0, 452.0)], LEVEL, None, now);
-        }
+        see_bar(&mut q, &mut now, None);
         for _ in 0..150 {
             now += Duration::from_millis(10);
             q.update(&[(592.0, 452.0)], LEVEL, None, now);
@@ -579,49 +555,54 @@ mod tests {
     }
 
     #[test]
-    fn the_gyroscope_takes_over_where_the_bar_left_off() {
+    fn with_a_bar_the_motion_plus_never_points() {
         let mut now = Instant::now();
         let mut p = calibrated(&mut now);
-        let real = [(400.0, 500.0), (560.0, 500.0)];
-        let mut last = None;
-        for _ in 0..5 {
-            now += Duration::from_millis(10);
-            last = p.update(&real, LEVEL, Some(&mp([8192; 3])), now).pos;
-        }
+        see_bar(&mut p, &mut now, Some(&mp([8192; 3])));
         now += Duration::from_millis(10);
-        let seen = p.update(&[], LEVEL, Some(&mp([8192; 3])), now);
-        assert_eq!(seen.source, Some(Source::Gyro));
-        let (a, b) = (last.unwrap(), seen.pos.unwrap());
-        assert!((a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3, "{a:?} {b:?}");
-        // Same dots, same spacing as the real ones (within a pixel).
-        let ForGame::Dots(d, _) = seen.game else { panic!() };
-        assert!((d[0].0 as f32 - 400.0).abs() <= 2.0 && (d[1].0 as f32 - 560.0).abs() <= 2.0, "{d:?}");
-        assert!((d[0].1 as f32 - 500.0).abs() <= 1.0, "{d:?}");
+        let seen = p.update(&BAR, LEVEL, Some(&mp([8192; 3])), now);
+        assert_eq!((seen.source, seen.game), (Some(Source::Bar), ForGame::Real));
+        // Off the bar, turning right 10°/s for two seconds: no pointer, as on a Wii.
+        for _ in 0..200 {
+            now += Duration::from_millis(10);
+            let seen = p.update(&[], LEVEL, Some(&mp([8192 + 161, 8192, 8192])), now);
+            assert_eq!((seen.pos, seen.game), (None, ForGame::Real));
+        }
+        // The bar back: where it says, as soon as the pair has held a few reports.
+        let mut seen = None;
+        for _ in 0..ACQUIRE {
+            now += Duration::from_millis(10);
+            seen = Some(p.update(&BAR, LEVEL, Some(&mp([8192; 3])), now));
+        }
+        let seen = seen.unwrap();
+        assert_eq!(seen.source, Some(Source::Bar));
+        let pos = seen.pos.unwrap();
+        assert!(pos.0.abs() < 1e-3 && pos.1.abs() < 1e-3, "{pos:?}");
     }
 
     #[test]
-    fn coming_back_to_the_bar_fades_instead_of_jumping() {
+    fn a_pair_seen_briefly_leaves_the_motion_plus_pointing() {
         let mut now = Instant::now();
         let mut p = calibrated(&mut now);
-        for _ in 0..5 {
+        for _ in 0..20 {
             now += Duration::from_millis(10);
-            p.update(&[(442.0, 452.0), (582.0, 452.0)], LEVEL, Some(&mp([8192; 3])), now);
+            assert_eq!(p.update(&BAR, LEVEL, Some(&mp([8192; 3])), now).source, Some(Source::Gyro));
         }
-        // Off the bar, turning right 10°/s for half a second.
-        for _ in 0..50 {
+        now += Duration::from_millis(10);
+        assert_eq!(p.update(&[], LEVEL, Some(&mp([8192; 3])), now).source, Some(Source::Gyro));
+    }
+
+    #[test]
+    fn a_bar_gone_for_good_hands_back_to_the_motion_plus() {
+        let mut now = Instant::now();
+        let mut p = calibrated(&mut now);
+        see_bar(&mut p, &mut now, Some(&mp([8192; 3])));
+        let mut last = None;
+        for _ in 0..3100 {
             now += Duration::from_millis(10);
-            p.update(&[], LEVEL, Some(&mp([8192 + 161, 8192, 8192])), now);
+            last = p.update(&[], LEVEL, Some(&mp([8192 + 161, 8192, 8192])), now).source;
         }
-        let gyro_x = p.pos.unwrap().0;
-        // The bar back, a little to the left of where the gyroscope thought.
-        let mut xs = vec![];
-        for _ in 0..60 {
-            now += Duration::from_millis(10);
-            xs.push(p.update(&[(442.0 - 30.0, 452.0), (582.0 - 30.0, 452.0)], LEVEL, Some(&mp([8192; 3])), now));
-        }
-        let first = xs[0].pos.unwrap().0;
-        assert!((first - gyro_x).abs() < 0.05, "{first} {gyro_x}");
-        assert!(matches!(xs.last().unwrap().game, ForGame::Real));
+        assert_eq!(last, Some(Source::Gyro));
     }
 
     #[test]

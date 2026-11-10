@@ -86,7 +86,9 @@ sert à les découvrir, puis le launcher ouvre les deux canaux HID L2CAP (PSM 0x
   à l'autre, A = valider, B = retour, HOME = accueil (`src/lib/remote-nav.svelte.js`). Il faut une
   sensor bar allumée ; sa position (au-dessus / en dessous de l'écran) se règle dans Manettes, avec
   une vue de ce que voit la caméra de J1. Amplitude de visée : `SPAN_X`, `SPAN_Y` en haut du fichier.
-- Sans sensor bar (aucun point IR depuis 5 s), le MotionPlus prend le relais : il est détecté
+- C'est soit la sensor bar, soit le MotionPlus, jamais les deux : une barre suivie une demi-seconde
+  pointe seule, comme sur une Wii (pas de main quand elle n'est pas en vue) ; sans barre (jamais vue,
+  ou plus vue depuis 30 s), le MotionPlus pointe (`BAR_CONFIRM`, `BAR_GONE`, `pointer.rs`). Il est détecté
   (registre 0xA600FA) et activé à la connexion, les données arrivent dans le rapport 0x37 (IR de
   base + 6 octets d'extension) et la main suit le gyroscope comme une souris. Le zéro du gyroscope
   se recalibre dès que la Wiimote est immobile. Réglages : `GYRO_SPAN_X`, `GYRO_SPAN_Y`.
@@ -118,7 +120,7 @@ Jouer → choix de l'ISO → vérification → Dolphin (`src-tauri/src/game.rs`,
   recherche ajoute un joueur à une place libre, puis s'arrête, car elle ralentit le Bluetooth.
 - Sans sensor bar, le gyroscope remplace la barre en jeu (`src-tauri/src/wiimote/bridge.rs`) : le jeu
   voit une Wiimote simple dans le mode qu'il demande, avec deux points IR calculés à partir du
-  MotionPlus, qui lui reste caché. Si la barre est vue, ses vrais points passent. Un Nunchuk branché
+  MotionPlus, qui lui reste caché. Avec une barre, ses vrais points passent tels quels, rien d'autre. Un Nunchuk branché
   ou une demande d'IR complète éteignent le MotionPlus et laissent passer la Wiimote telle quelle.
 - Dolphin tourne avec son propre dossier utilisateur (`<données>/dolphin`, sauvegardes comprises) et
   reçoit les réglages en options `-C` : ils ne touchent pas à sa configuration enregistrée. Sa

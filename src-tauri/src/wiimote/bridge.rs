@@ -498,17 +498,17 @@ mod tests {
         let mut p = Proxy::new(true, Pointer::default());
         game_set_up(&mut p, 0x33);
         let now = Instant::now();
-        // A pair counts as the bar once it has held for a few reports.
-        for i in 0..3 {
+        // A pair counts as the bar once it has held for half a second.
+        for i in 0..60 {
             p.from_remote(&report(BAR), now + Duration::from_millis(10 * i));
         }
-        let out = p.from_remote(&report(BAR), now + Duration::from_millis(30));
+        let out = p.from_remote(&report(BAR), now + Duration::from_millis(600));
         // x=100 y=200, then x=44 y=88, each with a size (125 px apart: far, size 1).
         assert_eq!(out.to_game[0][7..13], [100, 200, 1, 44, 88, 1]);
         assert_eq!(out.to_game[0][13..19], [0xFF; 6]);
 
         game_set_up(&mut p, 0x37);
-        let out = p.from_remote(&report(BAR), now + Duration::from_millis(40));
+        let out = p.from_remote(&report(BAR), now + Duration::from_millis(610));
         assert_eq!(out.to_game[0][7..17], BAR);
     }
 
@@ -522,13 +522,13 @@ mod tests {
         r[2] = 0x40;
         r[3] = 0x48;
         r[6] = 0x82;
-        for i in 0..3 {
+        for i in 0..60 {
             p.from_remote(&r, now + Duration::from_millis(10 * i));
         }
         // Setting the mode again starts from the first half.
         p.from_game(&[0xA2, 0x12, 0x04, 0x3E]);
-        let first = p.from_remote(&r, now + Duration::from_millis(30)).to_game.remove(0);
-        let second = p.from_remote(&r, now + Duration::from_millis(40)).to_game.remove(0);
+        let first = p.from_remote(&r, now + Duration::from_millis(600)).to_game.remove(0);
+        let second = p.from_remote(&r, now + Duration::from_millis(610)).to_game.remove(0);
         assert!(!p.motion_plus_off);
         assert_eq!((first[1], first.len(), second[1], second.len()), (0x3E, 23, 0x3F, 23));
         // Buttons in both; X then Y; Z's bits 7-6 and 9-8, then 3-2 and 5-4, in the spare button bits.
