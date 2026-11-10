@@ -3,6 +3,7 @@
 //! through the HID device Windows makes of it. Windows keeps a remote's HID device
 //! around after it is gone, so whether it is connected comes from Bluetooth.
 
+use super::journal;
 use super::protocol::{self, is_wiimote_name};
 use super::Availability;
 use crate::i18n::tr;
@@ -263,8 +264,11 @@ fn read(device: Arc<Handle>, addr: u64, stop: Arc<AtomicBool>, reports: mpsc::Un
         Ok(event) => event,
         Err(e) => return end(e),
     };
-    // Windows always fills a whole report (22 bytes for a Wii Remote).
-    let mut buf = [0u8; 64];
+    // One report at a time, its id then 21 bytes, as Dolphin reads (MAX_PAYLOAD - 1): a
+    // bigger buffer can be handed several queued reports at once, of which only the first
+    // was looked at (MotionPlus answers and data lost).
+    let mut buf = [0u8; 22];
+    let mut odd_sizes = 0;
     let mut last_heard = Instant::now();
     while !stop.load(Ordering::Relaxed) {
         let mut overlapped = OVERLAPPED { hEvent: event.0, ..Default::default() };
@@ -295,6 +299,10 @@ fn read(device: Arc<Handle>, addr: u64, stop: Arc<AtomicBool>, reports: mpsc::Un
             Err(e) => return end(e),
         };
         last_heard = Instant::now();
+        if n != buf.len() && odd_sizes < 5 {
+            odd_sizes += 1;
+            journal::note!("{} read {n} bytes: {}", format_addr(addr), journal::hex(&buf[..n]));
+        }
         // As it comes over L2CAP: header, then only the report's own bytes.
         if reports.send(Ok(protocol::from_hid(&buf[..n]))).is_err() {
             return;
@@ -340,10 +348,12 @@ impl Link {
     pub async fn send(&self, report: &[u8]) -> Result<(), String> {
         // Windows adds the HID transaction header itself.
         let report = protocol::to_hid(report).to_vec();
+        let sent = journal::hex(&report);
         let device = self.device.clone();
         let _turn = self.writing.lock().await;
         let result = spawn_blocking(move || write(&device, &report)).await.map_err(|e| e.to_string())?;
         if let Err(e) = &result {
+            journal::note!("{} write {sent} failed: {e}", format_addr(self.addr));
             // One write that timed out isn't a remote gone: Bluetooth tells.
             let addr = self.addr;
             if !spawn_blocking(move || is_connected(addr)).await.unwrap_or(true) {

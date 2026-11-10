@@ -287,7 +287,7 @@ impl Gyro {
     }
 
     /// The rest values (raw, slow) and whether a table set them: for the trace.
-    #[cfg(all(debug_assertions, not(test)))]
+    #[cfg(not(test))]
     pub fn rest(&self) -> (Option<[f32; 3]>, bool) {
         (self.bias, self.confident)
     }

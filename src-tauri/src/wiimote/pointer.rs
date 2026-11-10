@@ -3,6 +3,7 @@
 //!
 //! Screen units: x -1..1 left to right, y -1..1 top to bottom (beyond: off screen).
 
+use super::journal;
 use super::protocol::{self, Gyro, MotionPlus, PITCH, YAW};
 use std::time::{Duration, Instant};
 
@@ -258,8 +259,8 @@ impl Pointer {
     /// One report's worth: visible dots (camera px), raw accelerometer, MotionPlus sample.
     pub fn update(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
         let seen = self.step(dots, accel, motion, now);
-        #[cfg(all(debug_assertions, not(test)))]
-        trace::line(self, dots, accel, motion, &seen, now);
+        #[cfg(not(test))]
+        trace::line(self, dots, accel, motion, &seen);
         seen
     }
 
@@ -313,7 +314,7 @@ impl Pointer {
             let since = *self.bar_since.get_or_insert(now);
             if !self.bar_mode && now.duration_since(since) >= BAR_CONFIRM {
                 self.bar_mode = true;
-                eprintln!("wiimote: sensor bar found, it alone points now");
+                journal::note!("sensor bar found, it alone points now");
             }
         } else {
             self.bar_since = None;
@@ -324,7 +325,7 @@ impl Pointer {
         if self.bar_mode && self.bar_seen.is_some_and(|t| now.duration_since(t) > BAR_GONE) {
             self.bar_mode = false;
             self.pitch = None;
-            eprintln!("wiimote: no sensor bar for {} s, the MotionPlus points again", BAR_GONE.as_secs());
+            journal::note!("no sensor bar for {} s, the MotionPlus points again", BAR_GONE.as_secs());
         }
         if self.bar_mode {
             // As on a Wii: the game sees what the camera sees, and no pointer without the bar.
@@ -376,27 +377,25 @@ impl Pointer {
     }
 }
 
-/// Development builds: each report's inputs and pointer, one line each, in
-/// <temp dir>/wp-wiimote-trace.log (emptied when the launcher starts), to tune on real
-/// remotes: `tail -f /tmp/wp-wiimote-trace.log`.
-#[cfg(all(debug_assertions, not(test)))]
+/// Each report's inputs and pointer, one line each, in the remotes' journal (journal.rs),
+/// to see on someone else's remote what it gave: `tail -f /tmp/wp-wiimote.log`.
+#[cfg(not(test))]
 mod trace {
     use super::{ForGame, MotionPlus, Pointer, Seen};
-    use std::fs::File;
-    use std::io::{BufWriter, Write};
-    use std::sync::Mutex;
-    use std::time::Instant;
+    use crate::wiimote::journal;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    static OUT: Mutex<Option<(BufWriter<File>, Instant, u32)>> = Mutex::new(None);
+    static LINES: AtomicU32 = AtomicU32::new(0);
 
-    pub fn line(p: &Pointer, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, seen: &Seen, now: Instant) {
-        let Ok(mut out) = OUT.lock() else { return };
-        if out.is_none() {
-            let Ok(file) = File::create(std::env::temp_dir().join("wp-wiimote-trace.log")) else { return };
-            *out = Some((BufWriter::new(file), now, 0));
+    pub fn line(p: &Pointer, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, seen: &Seen) {
+        if LINES.fetch_add(1, Ordering::Relaxed) % 500 == 0 {
+            let (c, a) = (&p.gyro.cal, &p.accel_cal);
+            journal::write(&format!(
+                "# calibration: MotionPlus rest slow {:?} fast {:?}, units/°/s slow {:?}; accelerometer zero {:?} 1 g {:?}; tilt pointer {}",
+                c.zero[1], c.zero[0], c.units[1], a.zero, a.one_g, p.tilt
+            ));
         }
-        let Some((file, start, lines)) = out.as_mut() else { return };
-        let mut l = format!("{:9.3} dots={}", now.saturating_duration_since(*start).as_secs_f32(), dots.len());
+        let mut l = format!("dots={}", dots.len());
         for d in dots {
             l += &format!(" ({:.0},{:.0})", d.0, d.1);
         }
@@ -427,15 +426,7 @@ mod trace {
             ForGame::Dots(d, size) => l += &format!(" game=({},{})({},{})s{size}", d[0].0, d[0].1, d[1].0, d[1].1),
             ForGame::Nothing => l += " game=-",
         }
-        if *lines % 500 == 0 {
-            let c = &p.gyro.cal;
-            let _ = writeln!(file, "# MotionPlus calibration: rest slow {:?} fast {:?}, units/°/s slow {:?}", c.zero[1], c.zero[0], c.units[1]);
-        }
-        let _ = writeln!(file, "{l}");
-        *lines += 1;
-        if *lines % 25 == 0 {
-            let _ = file.flush();
-        }
+        journal::write(&l);
     }
 }
 

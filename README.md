@@ -95,6 +95,10 @@ sert à les découvrir, puis le launcher ouvre les deux canaux HID L2CAP (PSM 0x
   MotionPlus actif, un Nunchuk branché dessus est vu comme « Extension » sans son type.
   Un bouton dessiné avec une pastille A, B… (span `aria-hidden` au texte « A ») répond au bouton
   correspondant de la Wiimote ; A presse d'abord ce que la main ou la croix a sélectionné.
+- Journal des manettes, dans toutes les versions (`src-tauri/src/wiimote/journal.rs`) : `%TEMP%\wp-wiimote.log`
+  sous Windows, `/tmp/wp-wiimote.log` sous Linux, vidé à chaque lancement, 32 Mo au plus. Connexions, écritures
+  refusées, réponses de la manette, MotionPlus trouvé ou non, ce que le jeu lui demande, puis une ligne par rapport
+  (points IR, accéléromètre, gyroscope, d'où vient le pointeur). À demander à qui a un souci de manette.
 - Pendant la partie, elles restent connectées au launcher, à leur place : voir « Lancer le jeu ».
 - Code : `src-tauri/src/wiimote/` (commandes `wiimote_*`, évènement `wiimotes://state`) et
   `src/lib/wiimotes.svelte.js`.

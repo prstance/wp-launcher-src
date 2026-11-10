@@ -7,6 +7,7 @@
 //! MotionPlus and must not notice it: the remote stays in the report mode that carries
 //! both IR and gyroscope data, and the game sees a plain remote in the mode it asked for.
 
+use super::journal;
 use super::pointer::{AccelCal, ForGame, Pointer, EMPTY};
 use super::{pointer, protocol};
 use std::time::{Duration, Instant};
@@ -85,7 +86,7 @@ impl Proxy {
     /// Something is plugged into the MotionPlus, which the game can't get through this
     /// translation: turns the MotionPlus off and lets the remote speak for itself.
     fn stop_hiding(&mut self, now: Instant, out: &mut Forward) {
-        eprintln!("wiimote: something is plugged into the MotionPlus, the game gets the real remote (mode {:02X})", self.mode);
+        journal::note!("something is plugged into the MotionPlus, the game gets the real remote (mode {:02X})", self.mode);
         self.hiding = false;
         self.motion_plus_off = true;
         self.muted_acks += 2;
@@ -107,6 +108,10 @@ impl Proxy {
         let mut out = Forward::default();
         if report.len() < 3 {
             return out;
+        }
+        // Not rumble nor the speaker's (many, and they say nothing of the pointer).
+        if !matches!(report[1], 0x10 | 0x14 | 0x18 | 0x19) {
+            journal::note!("game -> {}", journal::hex(report));
         }
         if !self.hiding {
             out.to_remote.push(report.to_vec());
@@ -178,6 +183,9 @@ impl Proxy {
         let mut out = Forward::default();
         if report.len() < 2 {
             return out;
+        }
+        if matches!(report[1], 0x20..=0x22) {
+            journal::note!("game's remote <- {}", journal::hex(report));
         }
         if report[1] == 0x22 && report.get(4) == Some(&0x16) && self.muted_acks > 0 {
             if now.saturating_duration_since(self.muted_at) < MUTED_FOR {

@@ -3,6 +3,7 @@
 //! to it through a channel, and every change goes out as a `wiimotes://state` event.
 
 mod bridge;
+mod journal;
 mod pointer;
 mod protocol;
 #[cfg(target_os = "linux")]
@@ -175,7 +176,7 @@ pub fn start(app: AppHandle) -> Wiimotes {
     Wiimotes(tx)
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 enum MotionPlusState {
     Probing,
     Absent,
@@ -260,6 +261,7 @@ impl Remote {
     /// A MotionPlus told to start is on (its first data came, or its id says so): its
     /// own calibration can be read now.
     async fn motion_plus_on(&mut self) {
+        journal::note!("{} MotionPlus on", self.addr);
         self.motion_plus = MotionPlusState::Active;
         self.cal_read.clear();
         let _ = self.link.send(&protocol::read_register(protocol::MOTION_PLUS_CAL, 32)).await;
@@ -468,8 +470,12 @@ impl Manager {
             Msg::Connected { addr, name, link } => {
                 self.connecting.remove(&addr);
                 match link {
-                    Ok(link) => self.add(addr, name, link).await,
-                    Err(_) => {
+                    Ok(link) => {
+                        journal::note!("{addr} ({name}) connected");
+                        self.add(addr, name, link).await
+                    }
+                    Err(e) => {
+                        journal::note!("{addr} ({name}) not connected: {e}");
                         self.failed.insert(addr, Instant::now());
                     }
                 }
@@ -571,7 +577,8 @@ impl Manager {
             loop {
                 let n = match reader_link.recv(&mut buf).await {
                     Ok(n) => n,
-                    Err(_) => {
+                    Err(e) => {
+                        journal::note!("remote {id} lost: {e}");
                         let _ = tx.send(Msg::Lost { id });
                         break;
                     }
@@ -637,6 +644,10 @@ impl Manager {
         let Some(slot) = self.slots.iter().position(|r| r.as_ref().is_some_and(|r| r.id == id)) else { return };
         let drives_ui = slot == 0 && !self.paused;
         let (app, Some(r)) = (&self.app, &mut self.slots[slot]) else { return };
+        // Anything but data: status, read answers, write acknowledgements.
+        if !matches!(report.get(1), Some(0x30..=0x3F)) {
+            journal::note!("J{} {} <- {}", slot + 1, r.addr, journal::hex(report));
+        }
         // Queued before the remote was lent: the game's proxy speaks to it now.
         if r.lent.lock().unwrap().is_some() {
             return;
@@ -692,7 +703,14 @@ impl Manager {
             // Both ids answer at 0x00FA: while Probing, nothing else is read there.
             Input::Read { buttons, addr, data } if addr == 0x00FA && r.motion_plus == MotionPlusState::Probing => {
                 r.set_buttons(app, drives_ui, buttons);
-                if data.as_deref().is_some_and(protocol::is_motion_plus) {
+                let found = data.as_deref().is_some_and(protocol::is_motion_plus);
+                journal::note!(
+                    "J{} MotionPlus {} (its id: {})",
+                    slot + 1,
+                    if found { "found, starting it" } else { "absent" },
+                    data.as_deref().map_or("no answer".to_string(), journal::hex)
+                );
+                if found {
                     r.motion_plus = MotionPlusState::Starting;
                     (r.starting_since, r.start_resent) = (Instant::now(), false);
                     let (addr, value) = protocol::MOTION_PLUS_START;
@@ -758,6 +776,7 @@ impl Manager {
         for r in self.slots.iter_mut().flatten().filter(|r| r.motion_plus == MotionPlusState::Starting) {
             let waited = r.starting_since.elapsed();
             if waited >= START_GIVE_UP_AFTER {
+                journal::note!("{} MotionPlus told to start sends nothing: taken for absent", r.addr);
                 r.motion_plus = MotionPlusState::Absent;
             } else if waited >= START_AGAIN_AFTER && !r.start_resent {
                 r.start_resent = true;
@@ -839,8 +858,8 @@ impl Manager {
             return;
         };
         let motion_plus = r.motion_plus == MotionPlusState::Active;
-        eprintln!(
-            "wiimote: J{} lent to the game ({}, bar {})",
+        journal::note!(
+            "J{} lent to the game ({}, bar {})",
             slot + 1,
             match (motion_plus, r.pointer.gyro.ready()) {
                 (false, _) => "no MotionPlus",
@@ -928,8 +947,11 @@ async fn set_up(link: Arc<Link>, slot: usize, probe_motion_plus: bool) {
         .chain([protocol::report_mode(), protocol::read_memory(protocol::ACCEL_CAL, 10)])
         .chain(probe.into_iter().filter(|_| probe_motion_plus))
         .chain([protocol::status_request()]);
+    journal::note!("J{} set up{}", slot + 1, if probe_motion_plus { ", looking for a MotionPlus" } else { "" });
     for report in reports {
-        let _ = link.send(&report).await;
+        if let Err(e) = link.send(&report).await {
+            journal::note!("J{} {} failed: {e}", slot + 1, journal::hex(&report));
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -965,10 +987,10 @@ fn listen(tx: mpsc::UnboundedSender<Msg>) -> Option<(PathBuf, JoinHandle<()>)> {
     };
     let runtime = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from);
     let bound = runtime.into_iter().chain([std::env::temp_dir()]).find_map(|dir| {
-        bind(dir.clone()).map_err(|e| eprintln!("wiimote: no socket for Dolphin in {}: {e}", dir.display())).ok()
+        bind(dir.clone()).map_err(|e| journal::note!("no socket for Dolphin in {}: {e}", dir.display())).ok()
     });
     let Some((path, listener)) = bound else {
-        eprintln!("wiimote: no socket for Dolphin at all: it will have to connect the remotes itself");
+        journal::note!("no socket for Dolphin at all: it will have to connect the remotes itself");
         return None;
     };
     let task = spawn(async move {
@@ -991,7 +1013,7 @@ fn listen(tx: mpsc::UnboundedSender<Msg>) -> Option<(PathBuf, JoinHandle<()>)> {
     let mut pending = match create(true) {
         Ok(pipe) => pipe,
         Err(e) => {
-            eprintln!("wiimote: no pipe for Dolphin ({e}): it will have to connect the remotes itself");
+            journal::note!("no pipe for Dolphin ({e}): it will have to connect the remotes itself");
             return None;
         }
     };
@@ -1002,7 +1024,7 @@ fn listen(tx: mpsc::UnboundedSender<Msg>) -> Option<(PathBuf, JoinHandle<()>)> {
             let next = match create(false) {
                 Ok(pipe) => pipe,
                 Err(e) => {
-                    eprintln!("wiimote: the pipe for Dolphin takes no more connections: {e}");
+                    journal::note!("the pipe for Dolphin takes no more connections: {e}");
                     break;
                 }
             };
