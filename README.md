@@ -395,7 +395,7 @@ remplacés seulement si le launcher en apporte une version plus récente. Ils ne
 Une nouvelle installation démarre sur `prstance.mode-hiver`.
 
 Une version a les mêmes patchs qu'un mod, `code` compris : elle se lie aux mods activés et reste compatible avec eux.
-Mode Hiver (`prstance.mode-hiver` 2026.12.3) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
+Mode Hiver (`prstance.mode-hiver` 2026.12.4) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
 en fait un `.wpver` (`"package": "version"` dans son `wpmod.json`), à copier dans `src-tauri/versions/`. Un `.wpver`
 fourni doit être versionné (la CI de release l'embarque).
 
