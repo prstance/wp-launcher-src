@@ -38,6 +38,14 @@ const DEADZONE: f32 = 0.8;
 const PITCH_TAU: f32 = 1.0;
 /// Tilt pointer (no gyroscope, no bar): degrees of twist and of pitch to an edge.
 const TILT_SPAN: (f32, f32) = (30.0, 25.0);
+/// Gravity checks which way the gyroscope counts over spans this long: a vote each time the
+/// remote was raised or lowered by 3–40° in one, the gyroscope saw more than 2° of it, and
+/// the accelerometer felt gravity alone all along (within this much of 1 g: not swung).
+/// Tuned on a tester's journal: 12 votes, all right.
+const AXES_SPAN: f32 = 0.5;
+const AXES_CALM: f32 = 0.35;
+/// Votes one way in a row (net) to settle it, and as many back to change it again.
+const AXES_VOTES: i8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AccelCal {
@@ -143,6 +151,13 @@ pub struct Pointer {
     last: Option<Instant>,
     /// The last report's gyroscope rates (°/s yaw roll pitch), for the trace.
     rate: Option<[f32; 3]>,
+    /// +1, or −1 for a MotionPlus that counts its pitch and its yaw the other way round (one
+    /// mounted turned half round the pointing axis: seen on a tester's remote, left and right
+    /// swapped, up and down fighting gravity), as gravity's votes say.
+    axes: f32,
+    votes: i8,
+    /// The span being voted on: tilt at its start, the gyroscope's vertical angle since, its time.
+    span: Option<(f32, f32, f32)>,
 }
 
 impl Default for Pointer {
@@ -165,6 +180,9 @@ impl Default for Pointer {
             tilt_zero: None,
             last: None,
             rate: None,
+            axes: 1.0,
+            votes: 0,
+            span: None,
         }
     }
 }
@@ -256,6 +274,44 @@ impl Pointer {
         Some(Pair { mid, half: last.half, at: last.at })
     }
 
+    /// Gravity's say on which way the gyroscope counts: the vertical angle it saw over a span
+    /// against the tilt the accelerometer saw change. Spans where the remote was swung (more
+    /// than gravity felt) or hardly raised don't vote.
+    fn vote_axes(&mut self, r: [f32; 3], tilt_up: f32, g: f32, dt: f32) {
+        let calm = (g - 1.0).abs() < AXES_CALM;
+        let (s, c) = self.twist.sin_cos();
+        let up = r[PITCH] * c - r[YAW] * s;
+        let Some((tilt, angle, time)) = &mut self.span else {
+            self.span = calm.then_some((tilt_up, 0.0, 0.0));
+            return;
+        };
+        if !calm {
+            self.span = None;
+            return;
+        }
+        *angle += up * dt;
+        *time += dt;
+        if *time < AXES_SPAN {
+            return;
+        }
+        let moved = tilt_up - *tilt;
+        if (3.0..40.0).contains(&moved.abs()) && angle.abs() > 2.0 {
+            let agrees = *angle * moved > 0.0;
+            self.votes = (self.votes + if agrees { 1 } else { -1 }).clamp(-AXES_VOTES, AXES_VOTES);
+            let axes = match self.votes {
+                AXES_VOTES => 1.0,
+                v if v == -AXES_VOTES => -1.0,
+                _ => self.axes,
+            };
+            if axes != self.axes {
+                self.axes = axes;
+                self.pitch = None;
+                journal::note!("the MotionPlus counts {}", if axes < 0.0 { "the other way round: turned back" } else { "the usual way" });
+            }
+        }
+        self.span = Some((tilt_up, 0.0, 0.0));
+    }
+
     /// One report's worth: visible dots (camera px), raw accelerometer, MotionPlus sample.
     pub fn update(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
         let seen = self.step(dots, accel, motion, now);
@@ -270,7 +326,8 @@ impl Pointer {
 
         // Gravity: twist (about the pointing axis) and pitch, when not being shaken.
         let a: [f32; 3] = std::array::from_fn(|i| (accel[i] as f32 - self.accel_cal.zero[i]) / self.accel_cal.one_g[i]);
-        let level = ((a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt() - 1.0).abs() < 0.15;
+        let g = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        let level = (g - 1.0).abs() < 0.15;
         let across = a[0].hypot(a[2]);
         if across > 0.5 {
             self.twist = a[0].atan2(a[2]);
@@ -339,8 +396,12 @@ impl Pointer {
         // level, + yaw turns right and + pitch raises the nose (checked on a real remote).
         // Twisted by t, gravity is (sin t, ·, cos t) in x and z: a turn about it shows as
         // yaw·cos t + pitch·sin t, one about the horizontal as pitch·cos t − yaw·sin t.
+        if let Some(r) = self.rate {
+            self.vote_axes(r, tilt_up, g, dt);
+        }
         let turn = self.rate.map(|r| {
             let (s, c) = self.twist.sin_cos();
+            let r = r.map(|v| v * self.axes);
             let (right, up) = (r[YAW] * c + r[PITCH] * s, r[PITCH] * c - r[YAW] * s);
             let m2 = right * right + up * up;
             let k = m2 / (m2 + DEADZONE * DEADZONE);
@@ -416,6 +477,9 @@ mod trace {
         }
         if let Some(pitch) = p.pitch {
             l += &format!(" pitch={pitch:+.1}");
+        }
+        if p.axes < 0.0 {
+            l += " axes=turned";
         }
         l += &format!(" mode={} src={}", if p.bar_mode { "bar" } else { "motion" }, seen.source.map_or("-", |s| s.name()));
         if let Some((x, y)) = seen.pos {
@@ -679,6 +743,91 @@ mod tests {
         }
         let held = p.pos.unwrap().1;
         assert!((held - up).abs() < 0.05, "{up} {held}");
+    }
+
+    #[test]
+    fn a_motion_plus_counting_the_other_way_is_turned_back_by_gravity() {
+        let mut now = Instant::now();
+        let mut p = calibrated(&mut now);
+        // Mounted turned half round the pointing axis: x and z the other way.
+        let turned = |w: [f32; 3]| mp_for([-w[0], w[1], -w[2]]);
+        let raised = |deg: f32| {
+            let (s, c) = deg.to_radians().sin_cos();
+            [512, (512.0 - 104.0 * s).round() as u16, (512.0 + 104.0 * c).round() as u16]
+        };
+        // Up and down by 10° a few times, as anyone pointing does.
+        for _ in 0..4 {
+            for (from, rate) in [(0.0, 20.0), (10.0, -20.0)] {
+                for i in 0..50 {
+                    now += Duration::from_millis(10);
+                    let deg = from + rate * i as f32 * 0.01;
+                    p.update(&[], raised(deg), Some(&turned([-rate, 0.0, 0.0])), now);
+                }
+            }
+        }
+        assert_eq!(p.axes, -1.0);
+        // Turning right goes right now.
+        let start = p.pos.unwrap().0;
+        for _ in 0..30 {
+            now += Duration::from_millis(10);
+            p.update(&[], LEVEL, Some(&turned([0.0, 0.0, -20.0])), now);
+        }
+        assert!(p.pos.unwrap().0 - start > 0.25, "{start} {:?}", p.pos);
+    }
+
+    #[test]
+    fn a_usual_motion_plus_stays_as_it_is() {
+        let mut now = Instant::now();
+        let mut p = calibrated(&mut now);
+        let raised = |deg: f32| {
+            let (s, c) = deg.to_radians().sin_cos();
+            [512, (512.0 - 104.0 * s).round() as u16, (512.0 + 104.0 * c).round() as u16]
+        };
+        for _ in 0..4 {
+            for (from, rate) in [(0.0, 20.0), (10.0, -20.0)] {
+                for i in 0..50 {
+                    now += Duration::from_millis(10);
+                    p.update(&[], raised(from + rate * i as f32 * 0.01), Some(&mp_for([-rate, 0.0, 0.0])), now);
+                }
+            }
+        }
+        assert_eq!((p.axes, p.votes), (1.0, AXES_VOTES));
+    }
+
+    /// Replays a remote's journal (wp-wiimote.log, from someone's machine) through the pointer:
+    /// `WP_JOURNAL=path cargo test replays_a_journal -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn replays_a_journal() {
+        let path = std::env::var("WP_JOURNAL").expect("WP_JOURNAL=path to a wp-wiimote.log");
+        let start = Instant::now();
+        let mut p = Pointer::default();
+        let (mut last_axes, mut last_votes) = (p.axes, p.votes);
+        for line in std::fs::read_to_string(path).unwrap().lines() {
+            let field = |key: &str| line.split(' ').find_map(|w| w.strip_prefix(key));
+            let (Some(acc), Some(mp)) = (field("acc="), field("mp=")) else { continue };
+            let t: f32 = line.split_whitespace().next().unwrap().parse().unwrap();
+            let accel: Vec<u16> = acc.split(',').map(|v| v.parse().unwrap()).collect();
+            let motion = (mp != "-").then(|| {
+                let v: Vec<&str> = mp.split(',').collect();
+                MotionPlus {
+                    raw: std::array::from_fn(|i| v[i][..v[i].len() - 1].parse().unwrap()),
+                    slow: std::array::from_fn(|i| v[i].ends_with('s')),
+                    extension: false,
+                }
+            });
+            let dots: Vec<(f32, f32)> = line
+                .split(' ')
+                .filter_map(|w| w.strip_prefix('(')?.strip_suffix(')')?.split_once(','))
+                .filter_map(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+                .collect();
+            p.update(&dots, [accel[0], accel[1], accel[2]], motion.as_ref(), start + Duration::from_secs_f32(t));
+            if (p.axes, p.votes) != (last_axes, last_votes) {
+                println!("{t:9.3} axes {:+} votes {:+}", p.axes, p.votes);
+                (last_axes, last_votes) = (p.axes, p.votes);
+            }
+        }
+        println!("end: axes {} votes {}", p.axes, p.votes);
     }
 
     #[test]

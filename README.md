@@ -92,6 +92,8 @@ sert à les découvrir, puis le launcher ouvre les deux canaux HID L2CAP (PSM 0x
   (registre 0xA600FA) et activé à la connexion, les données arrivent dans le rapport 0x37 (IR de
   base + 6 octets d'extension) et la main suit le gyroscope comme une souris. Le zéro du gyroscope
   se recalibre dès que la Wiimote est immobile. Réglages : `GYRO_SPAN_X`, `GYRO_SPAN_Y`.
+  Certains MotionPlus comptent le tangage et le lacet à l'envers (gauche/droite inversés) : la gravité
+  le voit dès qu'on lève ou baisse la manette, et le launcher les remet à l'endroit (`vote_axes`).
   MotionPlus actif, un Nunchuk branché dessus est vu comme « Extension » sans son type.
   Un bouton dessiné avec une pastille A, B… (span `aria-hidden` au texte « A ») répond au bouton
   correspondant de la Wiimote ; A presse d'abord ce que la main ou la croix a sélectionné.
