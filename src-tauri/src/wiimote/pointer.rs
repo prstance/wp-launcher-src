@@ -18,6 +18,10 @@ const BAR_OFFSET_Y: f32 = 68.0;
 /// Pixels between the dots: 0.2 m of bar at 2 m in Dolphin's camera (1362 px focal).
 pub const SPACING: f32 = 140.0;
 const SPACING_RANGE: (f32, f32) = (40.0, 420.0);
+/// Spacing of the dots made for the game: KPAD drops a pair it puts nearer than 0.52 m or
+/// farther than 1 m plus the Wii's sensor bar sensitivity (3 in Dolphin: 4 m, 67 px), so
+/// 0.7–2.7 m, whatever was learned from a bar.
+const GAME_SPACING: (f32, f32) = (100.0, 400.0);
 /// Most a pair may lean away from what gravity says (KPAD's own check is cos ≥ 0.9).
 const MAX_LEAN: f32 = 25.0;
 /// Frames a new pair must hold before it counts as the bar.
@@ -226,6 +230,12 @@ impl Pointer {
         Self::dot_size(self.spacing)
     }
 
+    /// The dots the game gets for a pointer made without the bar.
+    fn for_game(&self, pos: (f32, f32)) -> ForGame {
+        let spacing = self.spacing.clamp(GAME_SPACING.0, GAME_SPACING.1);
+        ForGame::Dots(self.dots_for(pos, spacing, self.twist), Self::dot_size(spacing))
+    }
+
     /// The pair among the dots that looks like the bar, if any.
     fn pick(&self, dots: &[(f32, f32)], level: bool, now: Instant) -> Option<Pair> {
         let mut best: Option<(f32, Pair)> = None;
@@ -364,14 +374,18 @@ impl Pointer {
         self.rate = motion.and_then(|m| self.gyro.update(m, steady));
 
         if let Some(p) = pair {
-            let spacing = 2.0 * p.half.0.hypot(p.half.1);
-            self.spacing = if self.bar_since.is_none() { spacing } else { self.spacing + (spacing - self.spacing) * 0.2 };
             self.pair = Some(Pair { at: if dots.len() >= 2 { now } else { p.at }, ..p });
             self.bar_seen = Some(now);
             let since = *self.bar_since.get_or_insert(now);
             if !self.bar_mode && now.duration_since(since) >= BAR_CONFIRM {
                 self.bar_mode = true;
                 journal::note!("sensor bar found, it alone points now");
+            }
+            // Only a bar tells how far it is: two lamps paired for an instant while the remote
+            // swept past them had made the game's bar too far for KPAD, so no pointer at all.
+            if self.bar_mode {
+                let spacing = 2.0 * p.half.0.hypot(p.half.1);
+                self.spacing += (spacing - self.spacing) * 0.2;
             }
         } else {
             self.bar_since = None;
@@ -421,7 +435,7 @@ impl Pointer {
             let (x, y) = self.pos.unwrap_or((0.0, 0.0));
             let pos = ((x + dx).clamp(-1.0, 1.0), (y + dy).clamp(-1.0, 1.0));
             self.pos = Some(pos);
-            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: ForGame::Dots(self.dots_for(pos, self.spacing, self.twist), Self::dot_size(self.spacing)) };
+            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: self.for_game(pos) };
         }
 
         if self.tilt && motion.is_none() {
@@ -431,7 +445,7 @@ impl Pointer {
                 (-(tilt_up - zero) / TILT_SPAN.1).clamp(-1.0, 1.0),
             );
             self.pos = Some(pos);
-            return Seen { pos: Some(pos), source: Some(Source::Tilt), game: ForGame::Dots(self.dots_for(pos, self.spacing, self.twist), Self::dot_size(self.spacing)) };
+            return Seen { pos: Some(pos), source: Some(Source::Tilt), game: self.for_game(pos) };
         }
         self.tilt_zero = None;
         Seen { pos: None, source: None, game: ForGame::Nothing }
@@ -535,6 +549,26 @@ mod tests {
         }
         // Centre, bar on top: as the bridge always made it (442, 452), (582, 452).
         assert_eq!(Pointer::default().dots_for((0.0, 0.0), SPACING, 0.0)[..2], [(442, 452), (582, 452)]);
+    }
+
+    /// The tester's journal: swept past two lamps 50 px apart, held three frames, the game's
+    /// bar had stayed that far ever since (5 m: KPAD shows no pointer).
+    #[test]
+    fn lamps_swept_past_leave_the_game_bar_where_it_was() {
+        let mut now = Instant::now();
+        let mut p = calibrated(&mut now);
+        for _ in 0..10 {
+            now += Duration::from_millis(10);
+            p.update(&[(800.0, 300.0), (850.0, 300.0)], LEVEL, Some(&mp([8192; 3])), now);
+        }
+        now += Duration::from_millis(10);
+        let seen = p.update(&[], LEVEL, Some(&mp([8192; 3])), now);
+        let ForGame::Dots(d, _) = seen.game else { panic!("{seen:?}") };
+        assert_eq!(d[1].0 - d[0].0, SPACING as u16);
+        // A bar learned too far for KPAD still gives it one it takes.
+        p.spacing = 50.0;
+        let ForGame::Dots(d, _) = p.for_game((0.0, 0.0)) else { unreachable!() };
+        assert_eq!(d[1].0 - d[0].0, GAME_SPACING.0 as u16);
     }
 
     #[test]
@@ -827,7 +861,7 @@ mod tests {
                 (last_axes, last_votes) = (p.axes, p.votes);
             }
         }
-        println!("end: axes {} votes {}", p.axes, p.votes);
+        println!("end: axes {} votes {} spacing {}", p.axes, p.votes, p.spacing);
     }
 
     #[test]
