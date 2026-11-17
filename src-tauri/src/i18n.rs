@@ -146,6 +146,8 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("Mini-jeu", "Minigame", "Minijuego"),
     ("son mini-jeu « {id} » n’a pas un numéro valide", "its minigame “{id}” doesn’t have a valid number", "su minijuego «{id}» no tiene un número válido"),
     ("sa variable n’est pas dans le code du paquet", "its variable isn't in the package's code", "su variable no está en el código del paquete"),
+    ("un Mii s’écrit dans une variable du code du paquet, sur 8 octets", "a Mii is written into a variable of the package's code, in 8 bytes", "un Mii se escribe en una variable del código del paquete, en 8 bytes"),
+    ("seul un Mii s’écrit sur 8 octets", "only a Mii is written in 8 bytes", "solo un Mii se escribe en 8 bytes"),
     ("un de ses patchs désigne un fichier hors du paquet", "one of its patches points to a file outside the package", "uno de sus parches señala un archivo fuera del paquete"),
     ("{file} est introuvable dans le paquet", "{file} can't be found in the package", "{file} no está en el paquete"),
     ("« {b} » remplace en entier un fichier que « {a} » modifie ({file}) : « {b} » doit passer au système de mods compatibles.", "“{b}” replaces a whole file that “{a}” changes ({file}): “{b}” must move to the compatible mods system.", "«{b}» sustituye por completo un archivo que «{a}» modifica ({file}): «{b}» debe pasar al sistema de mods compatibles."),

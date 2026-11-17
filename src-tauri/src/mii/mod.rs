@@ -20,6 +20,8 @@ use tauri_plugin_dialog::DialogExt;
 
 /// As many as the Wii's database holds.
 pub const MAX: usize = 100;
+/// The game's own Miis (mii_rsd.bin).
+const DISC_MIIS: i64 = 100;
 const LIBRARY: &str = "library.json";
 const HEAD_SIZE: u32 = 192;
 /// Changes with the renderer, so that the heads drawn before are drawn again.
@@ -61,6 +63,8 @@ pub struct MiiView {
     /// The Mii's favorite color, as CSS.
     color: &'static str,
     birthday: Option<(u16, u16)>,
+    /// How a "mii" setting of a package names it (setting_key).
+    key: i64,
     /// PNG data URL; None until the face parts are taken from the disc.
     head: Option<String>,
 }
@@ -163,8 +167,27 @@ fn head(app: &AppHandle, faces: Option<&render::Resources>, raw: &Raw) -> Option
     Some(format!("data:image/png;base64,{}", B64.encode(png)))
 }
 
-fn view(id: String, raw: &Raw, head: Option<String>) -> MiiView {
+/// How a "mii" setting names a Mii, for the mod that reads it (wp-core mods/bgi-settings): the
+/// game's own Miis (mii_rsd.bin), which all have the same create ID, by their place, 1 to 100; the
+/// library's (the console's database in the game) by their create ID: 1 << 48, the two halves of
+/// the console's 4 bytes xor'ed, the Mii's own 4 bytes. Below 2^53: the page keeps it exact.
+pub fn setting_key(raw: &Raw, disc_index: Option<usize>) -> i64 {
+    if let Some(index) = disc_index {
+        return index as i64 + 1;
+    }
+    let id = data::create_id(raw);
+    let console = u16::from_be_bytes([id[4], id[5]]) ^ u16::from_be_bytes([id[6], id[7]]);
+    1 << 48 | (console as i64) << 32 | u32::from_be_bytes(id[..4].try_into().unwrap()) as i64
+}
+
+/// A value a "mii" setting may take (setting_key, or 0: the game's choice).
+pub fn is_setting_key(value: i64) -> bool {
+    (0..=DISC_MIIS).contains(&value) || value >> 48 == 1
+}
+
+fn view(id: String, raw: &Raw, head: Option<String>, disc_index: Option<usize>) -> MiiView {
     MiiView {
+        key: setting_key(raw, disc_index),
         id,
         name: data::name(raw),
         creator: data::creator(raw),
@@ -190,7 +213,7 @@ async fn state(app: &AppHandle) -> Result<MiisState, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let library = app.state::<Library>();
         let faces = library.faces(&app);
-        let miis = library.miis(&app).iter().map(|m| view(data::id(m), m, head(&app, faces.as_deref(), m))).collect();
+        let miis = library.miis(&app).iter().map(|m| view(data::id(m), m, head(&app, faces.as_deref(), m), None)).collect();
         MiisState { miis, faces: faces.is_some(), max: MAX, suggested_name: suggested_name() }
     })
     .await
@@ -313,6 +336,16 @@ mod tests {
     }
 
     #[test]
+    fn names_a_mii_for_the_settings() {
+        let mut raw = mii(1);
+        data::set_create_id(&mut raw, [0x87, 0x65, 0x43, 0x21, 0x12, 0x34, 0x00, 0x00]);
+        assert_eq!(setting_key(&raw, None), 0x0001_1234_8765_4321);
+        assert_eq!(setting_key(&raw, Some(24)), 25);
+        assert!(is_setting_key(0) && is_setting_key(100) && is_setting_key(0x0001_1234_8765_4321));
+        assert!(!is_setting_key(101) && !is_setting_key(-1) && !is_setting_key(2 << 48));
+    }
+
+    #[test]
     fn sees_a_saved_mii_once_it_is_written() {
         let mut watch = SaveWatch::new(vec![mii(1)]);
         // The channel starting up and rewriting its database isn't a save.
@@ -350,7 +383,7 @@ pub async fn miis_disc(app: AppHandle) -> Result<Vec<MiiView>, String> {
     }
     tauri::async_runtime::spawn_blocking(move || {
         let faces = app.state::<Library>().faces(&app);
-        Ok(disc_miis(&app)?.iter().enumerate().map(|(i, m)| view(i.to_string(), m, head(&app, faces.as_deref(), m))).collect())
+        Ok(disc_miis(&app)?.iter().enumerate().map(|(i, m)| view(i.to_string(), m, head(&app, faces.as_deref(), m), Some(i))).collect())
     })
     .await
     .map_err(io)?

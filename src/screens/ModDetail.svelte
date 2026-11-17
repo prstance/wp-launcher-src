@@ -4,6 +4,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import Sidebar from '../components/Sidebar.svelte';
   import Select from '../components/Select.svelte';
+  import MiiSetting from '../components/MiiSetting.svelte';
   import Notes from '../components/Notes.svelte';
   import { inTauri } from '../lib/tauri.js';
   import { router } from '../lib/router.svelte.js';
@@ -129,6 +130,8 @@
       <button type="button" role="switch" aria-checked={!!s.value} aria-label={local(s.label)} disabled={busy} onclick={() => change(s, s.value ? 0 : 1)} style="position: relative; flex-shrink: 0; width: 52px; height: 30px; border: 0; border-radius: 999px; cursor: pointer; background: {s.value ? '#25a720' : 'var(--off)'};"><span style="position: absolute; top: 4px; left: {s.value ? 26 : 4}px; width: 22px; height: 22px; border-radius: 999px; background: #ffffff; box-shadow: 0 2px 0 rgba(0,0,0,0.15);"></span></button>
     {:else if s.type === 'choice'}
       <Select label={local(s.label)} value={s.value} options={offered(s)} onchange={(v) => change(s, v)} />
+    {:else if s.type === 'mii'}
+      <MiiSetting setting={s} {busy} onchange={change} />
     {:else}
       <span role="group" aria-label={local(s.label)} style="flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 12px; background: var(--surface);">
         <button type="button" class="step" aria-label={t('Moins')} disabled={busy || s.value <= (s.min ?? -Infinity)} onclick={() => step(s, -1)}>−</button>

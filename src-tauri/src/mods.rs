@@ -141,7 +141,8 @@ struct Choice {
 #[derive(Deserialize, Clone)]
 struct Setting {
     id: String,
-    /// "toggle", "choice" or "number".
+    /// "toggle", "choice", "number" or "mii" (a Mii of the player's library or of the game, as
+    /// mii::setting_key numbers it; 0: none, the game's choice), written in 8 bytes.
     #[serde(rename = "type")]
     kind: String,
     label: Text,
@@ -254,6 +255,7 @@ impl Setting {
         match self.kind.as_str() {
             "toggle" => value == 0 || value == 1,
             "choice" => self.choices.iter().any(|c| c.value == value),
+            "mii" => crate::mii::is_setting_key(value),
             _ => (self.min..=self.max).contains(&value) && (value - self.min) % self.step == 0,
         }
     }
@@ -268,6 +270,7 @@ impl Setting {
         match self.kind.as_str() {
             "toggle" => vec![0, 1],
             "choice" => self.choices.iter().map(|c| c.value).collect(),
+            "mii" => vec![0],
             _ => vec![self.min, self.max],
         }
     }
@@ -285,7 +288,7 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
     if !id_fits {
         return fail(tr!("identifiant invalide"));
     }
-    if !["toggle", "choice", "number"].contains(&setting.kind.as_str()) {
+    if !["toggle", "choice", "number", "mii"].contains(&setting.kind.as_str()) {
         return fail(tr!("type « {kind} » inconnu", kind = setting.kind));
     }
     if setting.label.is_blank() || setting.choices.iter().any(|c| c.label.is_blank()) {
@@ -305,14 +308,20 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
     if !setting.allows(setting.default) {
         return fail(tr!("sa valeur par défaut n’est pas permise"));
     }
+    if setting.kind == "mii" && !(setting.riivolution.is_none() && setting.memory.is_none() && setting.symbol.as_ref().is_some_and(|s| s.size == 8)) {
+        return fail(tr!("un Mii s’écrit dans une variable du code du paquet, sur 8 octets"));
+    }
     match (&setting.riivolution, &setting.memory) {
         _ if setting.is_preset() => check_preset(m, setting).or_else(fail)?,
         (None, None) if setting.symbol.is_some() => {
             let slot = setting.symbol.as_ref().unwrap();
-            if !m.patches.iter().any(|p| p.kind == "code" && p.modules.contains_key(&slot.module)) || slot.name.is_empty() || ![1, 2, 4].contains(&slot.size) {
+            if !m.patches.iter().any(|p| p.kind == "code" && p.modules.contains_key(&slot.module)) || slot.name.is_empty() || ![1, 2, 4, 8].contains(&slot.size) {
                 return fail(tr!("sa variable n’est pas dans le code du paquet"));
             }
-            if !setting.values().iter().all(|v| holds(slot.size, *v)) {
+            if slot.size == 8 && setting.kind != "mii" {
+                return fail(tr!("seul un Mii s’écrit sur 8 octets"));
+            }
+            if slot.size < 8 && !setting.values().iter().all(|v| holds(slot.size, *v)) {
                 return fail(tr!("ses valeurs ne tiennent pas en {size} octet(s)", size = slot.size));
             }
         }
@@ -1633,6 +1642,33 @@ mod tests {
         package(&path, &[("mod.json", &json), ("code/x.o", "o"), ("lava.brres.lz", "l")]);
         install(&WPMOD, &path, &dir.join("mods"))?;
         Ok(installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap())
+    }
+
+    #[test]
+    fn a_mii_setting_writes_its_key_in_8_bytes() {
+        let dir = scratch("mii-setting");
+        let json = |size: u32, kind: &str| {
+            format!(
+                r#"{{"format":1,"id":"m","name":"m","version":"1.0.0","games":["SUPP01"],
+                "settings":[{{"id":"cpu","type":"{kind}","label":"CPU","default":0,"symbol":{{"module":"menu","name":"gMiis","size":{size},"offset":8}}}}],
+                "patches":[{{"type":"code","modules":{{"menu":{{"objects":["code/x.o"]}}}}}}]}}"#
+            )
+        };
+        let path = dir.join("in").join("m.wpmod");
+        for (size, kind, why) in [(4, "mii", "8 octets"), (8, "number", "seul un Mii")] {
+            package(&path, &[("mod.json", &json(size, kind)), ("code/x.o", "o")]);
+            let refused = install(&WPMOD, &path, &dir.join("mods")).err().unwrap_or_else(|| panic!("accepté : {size} {kind}"));
+            assert!(refused.contains(why), "{why} : {refused}");
+        }
+        package(&path, &[("mod.json", &json(8, "mii")), ("code/x.o", "o")]);
+        install(&WPMOD, &path, &dir.join("mods")).unwrap();
+        let library_mii = 1 << 48 | 0x1234 << 32 | 0x8765_4321;
+        for (value, bytes) in [(25, vec![0, 0, 0, 0, 0, 0, 0, 25]), (library_mii, vec![0, 1, 0x12, 0x34, 0x87, 0x65, 0x43, 0x21]), (101, vec![0; 8])] {
+            let values = Values::from([("m".to_string(), BTreeMap::from([("cpu".to_string(), value)]))]);
+            let m = installed(&WPMOD, &dir.join("mods"), &values).into_iter().next().unwrap();
+            assert_eq!(code_mod(&m).writes, [("menu".to_string(), "gMiis".to_string(), 8, bytes)], "{value}");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

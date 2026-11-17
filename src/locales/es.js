@@ -341,4 +341,8 @@ export default {
   "Mettre à jour": "Actualizar",
   "Installation…": "Instalando…",
   "Rechercher une mise à jour": "Buscar actualizaciones",
+  "Au choix du jeu": "Lo elige el juego",
+  "Mii introuvable": "Mii no encontrado",
+  "Choisis un Mii": "Elige un Mii",
+  "Pas encore de Mii à toi : ajoute-les dans Mes Mii.": "Aún no tienes Mii propios: añádelos en Mis Mii.",
 };
