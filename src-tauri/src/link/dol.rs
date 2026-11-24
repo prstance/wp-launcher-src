@@ -280,13 +280,16 @@ fn trampoline(start: u32, at: u32, original: u32, before: &[u32], after: &[u32])
     Ok(a.code)
 }
 
+/// The memory patches, the code first, and the parts' global symbols (name, address): a mod's code in a REL
+/// may use them (its main.dol part's variables and functions).
+pub type Linked = (Vec<Patch>, Vec<(String, u32)>);
+
 /// Links the mods' main.dol parts after `data` (at BASE: the minigame table, minigames.rs), then in `spare`
-/// what does not fit. Returns the memory patches, the code first. An injected instruction and a replaced
-/// function's first one are given (`expect`, Riivolution checks them: `original`), so main.dol itself is not
-/// needed.
-pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&Spare>) -> Result<Vec<Patch>, LinkError> {
+/// what does not fit. An injected instruction and a replaced function's first one are given (`expect`,
+/// Riivolution checks them: `original`), so main.dol itself is not needed.
+pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&Spare>) -> Result<Linked, LinkError> {
     if data.is_empty() && parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty() && p.replaces.is_empty()) {
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     }
     let all: Vec<&str> = parts.iter().map(|p| p.id.as_str()).collect();
     if BASE + data.len() as u32 > END {
@@ -496,7 +499,9 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&S
         }
     }
     patches.extend(site_patches);
-    Ok(patches)
+    let mut symbols: Vec<(String, u32)> = globals.into_iter().map(|(name, (at, _))| (name, at)).collect();
+    symbols.sort();
+    Ok((patches, symbols))
 }
 
 #[cfg(test)]
@@ -530,7 +535,8 @@ mod tests {
             ..Default::default()
         };
         let spare = Spare { address: 0x801D_D0E0, original: vec![0x55; 0x40] };
-        let p = link(&[part], &main, &data, Some(&spare)).unwrap();
+        let (p, symbols) = link(&[part], &main, &data, Some(&spare)).unwrap();
+        assert_eq!(symbols, [("f_orig".to_string(), 0x801D_D0E0), ("handler".to_string(), BASE + 0x1700)]);
         assert_eq!(p.len(), 3);
         assert_eq!((p[0].address, p[0].value.len()), (BASE, 0x1800));
         assert_eq!(&p[0].value[0x1700..0x1704], &[1, 2, 3, 4]);

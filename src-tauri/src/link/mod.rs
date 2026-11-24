@@ -201,7 +201,7 @@ type Built = (Vec<String>, Vec<(String, Vec<u8>)>);
 fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mods: &[CodeMod]) -> Result<Built, LinkError> {
     let all: Vec<&str> = mods.iter().map(|m| m.id).collect();
     let io = |e: std::io::Error| LinkError::new(format!("cœur des mods : {e}"), &[]);
-    let main = rel::MainSymbols::parse(&std::fs::read_to_string(core.join("main.sym")).map_err(io)?).map_err(|e| LinkError::new(e, &[]))?;
+    let mut main = rel::MainSymbols::parse(&std::fs::read_to_string(core.join("main.sym")).map_err(io)?).map_err(|e| LinkError::new(e, &[]))?;
     let mut lines = Vec::new();
     let mut made = Vec::new();
 
@@ -259,11 +259,16 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         parts.push(dol::DolPart { id: "cœur".into(), objects: vec![object], replaces, writes, ..Default::default() });
     }
     let spare = registry.as_ref().and_then(minigames::reuse).map(|(address, original)| dol::Spare { address, original });
-    for p in dol::link(&parts, &main, &table.data, spare.as_ref())? {
+    let (patches, symbols) = dol::link(&parts, &main, &table.data, spare.as_ref())?;
+    for p in patches {
         match &p.original {
             Some(o) => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}" original="{}"/>"#, p.address, hexs(&p.value), hexs(o))),
             None => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}"/>"#, p.address, hexs(&p.value))),
         }
+    }
+    // the RELs may use the mods' main.dol code (a REL part that drives its main.dol part)
+    for (name, address) in &symbols {
+        main.add(name, *address);
     }
 
     for (address, value, original) in &table.patches {

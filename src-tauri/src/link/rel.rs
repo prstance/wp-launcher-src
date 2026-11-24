@@ -30,6 +30,12 @@ impl MainSymbols {
     pub fn get(&self, name: &str) -> Option<(u32, u16)> {
         self.by_name.get(name).copied()
     }
+
+    /// A symbol of the mods' main.dol code (dol.rs), for the RELs; main.dol's own of that name wins. The
+    /// section does not matter: a REL's relocations against main.dol (module 0) are absolute.
+    pub fn add(&mut self, name: &str, address: u32) {
+        self.by_name.entry(name.to_string()).or_insert((address, 0));
+    }
 }
 
 /// What `dtk rel make` keeps of the disc's REL header (wp-core mr001.json).
