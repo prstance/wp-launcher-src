@@ -35,9 +35,10 @@ pub fn status_request() -> Vec<u8> {
 }
 
 /// Reports with core buttons, accelerometer, 10 bytes of IR and 6 of extension
-/// (0x37, where MotionPlus data lands), sent on change.
+/// (0x37, where MotionPlus data lands), sent continuously: the gyroscope's pointer counts
+/// time in reports, which a remote held still would otherwise stop sending.
 pub fn report_mode() -> Vec<u8> {
-    vec![OUT, 0x12, 0x00, 0x37]
+    vec![OUT, 0x12, 0x04, 0x37]
 }
 
 /// Writes up to 16 bytes to the remote's register space (IR camera at 0xB0xxxx,
@@ -188,8 +189,9 @@ pub struct MotionPlus {
     pub extension: bool,
 }
 
-/// Axes in samples and rates (roll is 1).
+/// Axes in samples and rates.
 pub const YAW: usize = 0;
+pub const ROLL: usize = 1;
 pub const PITCH: usize = 2;
 
 pub fn motion_plus(ext: &[u8; 6]) -> Option<MotionPlus> {
@@ -206,7 +208,9 @@ pub fn motion_plus(ext: &[u8; 6]) -> Option<MotionPlus> {
 }
 
 /// The MotionPlus's own calibration (32 bytes at 0x20 of its registers): per mode
-/// (0 fast, 1 slow) and axis, the raw rest value and raw units per degree/second.
+/// (0 fast, 1 slow) and axis, the raw rest value and raw units per degree/second. The
+/// units keep their sign: a gyroscope mounted the other way round has its scale below its
+/// zero, and that sign is what says which way it counts (Dolphin's MotionPlus.cpp).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GyroCal {
     pub zero: [[f32; 3]; 2],
@@ -214,9 +218,11 @@ pub struct GyroCal {
 }
 
 impl Default for GyroCal {
-    /// Dolphin's emulated MotionPlus: 0x1100 raw for 1200°/s fast, 270°/s slow.
+    /// Dolphin's emulated MotionPlus: 0x1100 raw for 1200°/s fast, 270°/s slow, yaw and
+    /// pitch scales below their zero (as the testers' remotes had them).
     fn default() -> Self {
-        GyroCal { zero: [[8192.0; 3]; 2], units: [[4352.0 / 1200.0; 3], [4352.0 / 270.0; 3]] }
+        let (fast, slow) = (4352.0 / 1200.0, 4352.0 / 270.0);
+        GyroCal { zero: [[8192.0; 3]; 2], units: [[-fast, fast, -fast], [-slow, slow, -slow]] }
     }
 }
 
@@ -235,14 +241,15 @@ impl GyroCal {
             for axis in 0..3 {
                 let (zero, scale) = (word(axis), word(3 + axis));
                 cal.zero[mode][axis] = zero / 4.0;
-                cal.units[mode][axis] = (scale - zero).abs() / 4.0 / degrees;
+                cal.units[mode][axis] = (scale - zero) / 4.0 / degrees;
             }
         }
         let plausible = (0..3).all(|a| {
             (6000.0..=10400.0).contains(&cal.zero[0][a])
                 && (6000.0..=10400.0).contains(&cal.zero[1][a])
-                && (2.5..=6.0).contains(&cal.units[0][a])
-                && (10.0..=22.0).contains(&cal.units[1][a])
+                && (2.5..=6.0).contains(&cal.units[0][a].abs())
+                && (10.0..=22.0).contains(&cal.units[1][a].abs())
+                && cal.units[0][a].signum() == cal.units[1][a].signum()
         });
         plausible.then_some(cal)
     }
@@ -292,7 +299,8 @@ impl Gyro {
         (self.bias, self.confident)
     }
 
-    /// Degrees/second [yaw, roll, pitch] (None until a rest value is known).
+    /// Degrees/second [yaw, roll, pitch], counted the way the calibration says (None until
+    /// a rest value is known).
     /// `steady`: something else (the sensor bar) says the remote isn't turning.
     pub fn update(&mut self, m: &MotionPlus, steady: bool) -> Option<[f32; 3]> {
         self.learn(m, steady);
@@ -562,6 +570,14 @@ mod tests {
         }
         assert!(GyroCal::parse(&[0xFF; 32]).is_none());
         assert!(GyroCal::parse(&[0x00; 32]).is_none());
+        // A tester's external MotionPlus (its journal): yaw and pitch count down, roll up.
+        let tester = [
+            0x7C, 0x5F, 0x7C, 0x64, 0x7C, 0x02, 0x35, 0xCA, 0xCA, 0x6D, 0x34, 0x9A, 0xC8, 0x01, 0x49, 0xC7,
+            0x7B, 0x56, 0x7B, 0x6C, 0x79, 0xB1, 0x38, 0x6E, 0xC7, 0xD1, 0x37, 0x29, 0x2D, 0xDC, 0x75, 0x8D,
+        ];
+        let cal = GyroCal::parse(&tester).unwrap();
+        assert!(cal.units[1][YAW] < 0.0 && cal.units[1][1] > 0.0 && cal.units[1][PITCH] < 0.0, "{cal:?}");
+        assert!((cal.units[1][YAW] + 15.86).abs() < 0.01, "{cal:?}");
     }
 
     #[test]
@@ -572,12 +588,12 @@ mod tests {
             assert!(g.update(&motion_plus(&ext([8063 + wobble, 8190, 8210], [true; 3])).unwrap(), false).is_none());
         }
         assert!(g.update(&motion_plus(&ext([8064, 8190, 8210], [true; 3])).unwrap(), false).is_some());
-        // 10°/s to the right, slow mode.
+        // 10°/s, slow mode: yaw's scale is below its zero, so raw counts up for −10.
         let r = g.update(&motion_plus(&ext([8064 + 161, 8190, 8210], [true; 3])).unwrap(), false).unwrap();
-        assert!((r[YAW] - 10.0).abs() < 0.1 && r[PITCH].abs() < 0.1, "{r:?}");
+        assert!((r[YAW] + 10.0).abs() < 0.1 && r[PITCH].abs() < 0.1, "{r:?}");
         // 500°/s in fast mode: the rest offset shrinks with the gain (8064 → 8163).
         let fast_rest: f32 = 8192.0 + (8064.0 - 8192.0) * (4352.0 / 1200.0) / (4352.0 / 270.0);
-        let raw = (fast_rest + 500.0 * 4352.0 / 1200.0).round() as u16;
+        let raw = (fast_rest - 500.0 * 4352.0 / 1200.0).round() as u16;
         let r = g.update(&motion_plus(&ext([raw, 8190, 8210], [false, true, true])).unwrap(), false).unwrap();
         assert!((r[YAW] - 500.0).abs() < 0.5, "{r:?}");
     }
@@ -601,7 +617,7 @@ mod tests {
             g.update(&motion_plus(&ext([(held(i) + 48) as u16, 8192, 8192], [true; 3])).unwrap(), false);
         }
         let r = g.update(&motion_plus(&ext([8148, 8192, 8192], [true; 3])).unwrap(), false).unwrap();
-        assert!((r[YAW] - 3.0).abs() < 0.2, "{r:?}");
+        assert!((r[YAW] + 3.0).abs() < 0.2, "{r:?}");
     }
 
     #[test]

@@ -35,7 +35,9 @@ const STATE_EVENT: &str = "wiimotes://state";
 /// J1 drives the launcher: where it points, and its button presses/releases.
 const POINTER_EVENT: &str = "wiimotes://pointer";
 const BUTTON_EVENT: &str = "wiimotes://button";
-const POINTER_EVERY: Duration = Duration::from_millis(15);
+/// At most this often: reports often come two at a time, and 15 ms let only every other
+/// pair through (40 Hz, jerky on a 60 Hz screen).
+const POINTER_EVERY: Duration = Duration::from_millis(8);
 const SLOTS: usize = 4;
 const TICK: Duration = Duration::from_secs(1);
 const BATTERY_EVERY: Duration = Duration::from_secs(60);

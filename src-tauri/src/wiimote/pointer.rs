@@ -4,7 +4,7 @@
 //! Screen units: x -1..1 left to right, y -1..1 top to bottom (beyond: off screen).
 
 use super::journal;
-use super::protocol::{self, Gyro, MotionPlus, PITCH, YAW};
+use super::protocol::{self, Gyro, MotionPlus, PITCH, ROLL, YAW};
 use std::time::{Duration, Instant};
 
 pub const EMPTY: (u16, u16) = (1023, 1023);
@@ -34,22 +34,23 @@ const BAR_GONE: Duration = Duration::from_secs(30);
 /// How long one dot keeps a bar going, and how far it may be from where one was.
 const ONE_DOT_FOR: Duration = Duration::from_secs(1);
 const ONE_DOT_REACH: f32 = 60.0;
-/// Degrees to turn across the whole screen, the same px/° both ways (REACH ratio).
-const GYRO_SPAN: (f32, f32) = (36.0, 36.0 * REACH.1 / REACH.0);
-/// Below about this rate (°/s) turns are damped, hand tremor and residual drift with them.
-const DEADZONE: f32 = 0.8;
-/// Gravity pulls the gyroscope's vertical angle back within about this time (s).
-const PITCH_TAU: f32 = 1.0;
+/// The MotionPlus pointer is Dolphin's (IMUCursor, EmulateIMUCursor in Dynamics.cpp): degrees
+/// from the screen's centre to its side edges ("Total Yaw" 25°) and to its top and bottom (the
+/// same px/° both ways, REACH ratio: 10°).
+const GYRO_EDGE: (f32, f32) = (12.5, 12.5 * REACH.1 / REACH.0);
+/// Slower turns about one axis (°/s) are none: hand tremor and what's left of drift
+/// (Dolphin's gyroscope dead zone, IMUGyroscope.cpp).
+const DEADZONE: f32 = 2.0;
+/// How much gravity straightens the gyroscope's pitch and roll every 5 ms (Dolphin's
+/// "Accelerometer Influence", 2 % at its 200 Hz): within a quarter of a second.
+const ACCEL_WEIGHT: f32 = 0.02;
+const ACCEL_EVERY: f32 = 0.005;
+/// Reports come in bursts (two 2 ms apart, then nothing for 12–25 ms: testers' journals)
+/// although the remote measures evenly: each counts for the average time between them,
+/// followed with this weight.
+const PERIOD_WEIGHT: f32 = 0.02;
 /// Tilt pointer (no gyroscope, no bar): degrees of twist and of pitch to an edge.
 const TILT_SPAN: (f32, f32) = (30.0, 25.0);
-/// Gravity checks which way the gyroscope counts over spans this long: a vote each time the
-/// remote was raised or lowered by 3–40° in one, the gyroscope saw more than 2° of it, and
-/// the accelerometer felt gravity alone all along (within this much of 1 g: not swung).
-/// Tuned on a tester's journal: 12 votes, all right.
-const AXES_SPAN: f32 = 0.5;
-const AXES_CALM: f32 = 0.35;
-/// Votes one way in a row (net) to settle it, and as many back to change it again.
-const AXES_VOTES: i8 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AccelCal {
@@ -124,6 +125,94 @@ pub struct Seen {
     pub game: ForGame,
 }
 
+/// A rotation (w, x, y, z), as Dolphin's Common::Quaternion.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Quat([f32; 4]);
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+impl Quat {
+    const IDENTITY: Quat = Quat([1.0, 0.0, 0.0, 0.0]);
+
+    /// `angle` radians about the unit `axis`.
+    fn rotate(angle: f32, axis: [f32; 3]) -> Quat {
+        let (s, c) = (angle / 2.0).sin_cos();
+        Quat([c, axis[0] * s, axis[1] * s, axis[2] * s])
+    }
+
+    /// |v| radians about v.
+    fn turn(v: [f32; 3]) -> Quat {
+        let len = dot(v, v).sqrt();
+        if len > 0.0 { Quat::rotate(len, v.map(|c| c / len)) } else { Quat::IDENTITY }
+    }
+
+    fn then(self, o: Quat) -> Quat {
+        let ([aw, ax, ay, az], [bw, bx, by, bz]) = (self.0, o.0);
+        Quat([
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ])
+    }
+
+    fn inverse(self) -> Quat {
+        let [w, x, y, z] = self.0;
+        Quat([w, -x, -y, -z])
+    }
+
+    fn apply(self, v: [f32; 3]) -> [f32; 3] {
+        let [_, x, y, z] = self.then(Quat([0.0, v[0], v[1], v[2]])).then(self.inverse()).0;
+        [x, y, z]
+    }
+
+    fn normalized(self) -> Quat {
+        let n = self.0.iter().map(|c| c * c).sum::<f32>().sqrt();
+        Quat(self.0.map(|c| c / n))
+    }
+
+    /// Turned `share` of the way from where it puts gravity to where the accelerometer
+    /// feels it (`up`, unit): pitch and roll only (Dolphin's ComplementaryFilter).
+    fn toward(self, up: [f32; 3], share: f32) -> Quat {
+        let seen = self.apply([0.0, 0.0, 1.0]);
+        let axis = cross(seen, up);
+        let len = dot(axis, axis).sqrt();
+        if len < 1e-6 {
+            return self;
+        }
+        Quat::rotate(dot(seen, up).clamp(-1.0, 1.0).acos() * share, axis.map(|c| c / len)).then(self)
+    }
+
+    /// Turning right is +, in radians (Dolphin's GetYaw: the remote's back, y, in the world).
+    fn yaw(self) -> f32 {
+        let back = self.inverse().apply([0.0, 1.0, 0.0]);
+        back[0].atan2(back[1])
+    }
+
+    /// Raising the nose is − (Dolphin's GetPitch).
+    fn pitch(self) -> f32 {
+        let up = self.apply([0.0, 0.0, 1.0]);
+        up[1].atan2(up[0].hypot(up[2]))
+    }
+
+    /// The twist, as the accelerometer's (Dolphin's GetRoll).
+    fn roll(self) -> f32 {
+        let up = self.apply([0.0, 0.0, 1.0]);
+        up[0].atan2(up[2])
+    }
+
+    /// Turned about the vertical to that yaw.
+    fn with_yaw(self, yaw: f32) -> Quat {
+        self.then(Quat::rotate(yaw - self.yaw(), [0.0, 0.0, 1.0]))
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Pair {
     mid: (f32, f32),
@@ -139,8 +228,13 @@ pub struct Pointer {
     pub bar_top: bool,
     /// Plain remotes without a bar point by tilting.
     pub tilt: bool,
+    /// From gravity alone, unfiltered: for the bar's lean and the tilt pointer.
     twist: f32,
-    pitch: Option<f32>,
+    /// How the world sits around the remote for the MotionPlus pointer (Dolphin's
+    /// IMUCursorState): world vectors into the accelerometer's axes, x left, y back, z up.
+    orient: Option<Quat>,
+    /// Average time between reports (s).
+    period: f32,
     pair: Option<Pair>,
     candidate: Option<(Pair, u8)>,
     spacing: f32,
@@ -155,13 +249,6 @@ pub struct Pointer {
     last: Option<Instant>,
     /// The last report's gyroscope rates (°/s yaw roll pitch), for the trace.
     rate: Option<[f32; 3]>,
-    /// +1, or −1 for a MotionPlus that counts its pitch and its yaw the other way round (one
-    /// mounted turned half round the pointing axis: seen on a tester's remote, left and right
-    /// swapped, up and down fighting gravity), as gravity's votes say.
-    axes: f32,
-    votes: i8,
-    /// The span being voted on: tilt at its start, the gyroscope's vertical angle since, its time.
-    span: Option<(f32, f32, f32)>,
 }
 
 impl Default for Pointer {
@@ -172,7 +259,8 @@ impl Default for Pointer {
             bar_top: true,
             tilt: false,
             twist: 0.0,
-            pitch: None,
+            orient: None,
+            period: 0.01,
             pair: None,
             candidate: None,
             spacing: SPACING,
@@ -184,9 +272,6 @@ impl Default for Pointer {
             tilt_zero: None,
             last: None,
             rate: None,
-            axes: 1.0,
-            votes: 0,
-            span: None,
         }
     }
 }
@@ -231,9 +316,9 @@ impl Pointer {
     }
 
     /// The dots the game gets for a pointer made without the bar.
-    fn for_game(&self, pos: (f32, f32)) -> ForGame {
+    fn for_game(&self, pos: (f32, f32), twist: f32) -> ForGame {
         let spacing = self.spacing.clamp(GAME_SPACING.0, GAME_SPACING.1);
-        ForGame::Dots(self.dots_for(pos, spacing, self.twist), Self::dot_size(spacing))
+        ForGame::Dots(self.dots_for(pos, spacing, twist), Self::dot_size(spacing))
     }
 
     /// The pair among the dots that looks like the bar, if any.
@@ -284,44 +369,6 @@ impl Pointer {
         Some(Pair { mid, half: last.half, at: last.at })
     }
 
-    /// Gravity's say on which way the gyroscope counts: the vertical angle it saw over a span
-    /// against the tilt the accelerometer saw change. Spans where the remote was swung (more
-    /// than gravity felt) or hardly raised don't vote.
-    fn vote_axes(&mut self, r: [f32; 3], tilt_up: f32, g: f32, dt: f32) {
-        let calm = (g - 1.0).abs() < AXES_CALM;
-        let (s, c) = self.twist.sin_cos();
-        let up = r[PITCH] * c - r[YAW] * s;
-        let Some((tilt, angle, time)) = &mut self.span else {
-            self.span = calm.then_some((tilt_up, 0.0, 0.0));
-            return;
-        };
-        if !calm {
-            self.span = None;
-            return;
-        }
-        *angle += up * dt;
-        *time += dt;
-        if *time < AXES_SPAN {
-            return;
-        }
-        let moved = tilt_up - *tilt;
-        if (3.0..40.0).contains(&moved.abs()) && angle.abs() > 2.0 {
-            let agrees = *angle * moved > 0.0;
-            self.votes = (self.votes + if agrees { 1 } else { -1 }).clamp(-AXES_VOTES, AXES_VOTES);
-            let axes = match self.votes {
-                AXES_VOTES => 1.0,
-                v if v == -AXES_VOTES => -1.0,
-                _ => self.axes,
-            };
-            if axes != self.axes {
-                self.axes = axes;
-                self.pitch = None;
-                journal::note!("the MotionPlus counts {}", if axes < 0.0 { "the other way round: turned back" } else { "the usual way" });
-            }
-        }
-        self.span = Some((tilt_up, 0.0, 0.0));
-    }
-
     /// One report's worth: visible dots (camera px), raw accelerometer, MotionPlus sample.
     pub fn update(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
         let seen = self.step(dots, accel, motion, now);
@@ -331,7 +378,9 @@ impl Pointer {
     }
 
     fn step(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
-        let dt = self.last.map_or(0.01, |t| now.saturating_duration_since(t).as_secs_f32().min(0.1));
+        if let Some(since) = self.last.map(|t| now.saturating_duration_since(t).as_secs_f32()).filter(|&s| s < 0.1) {
+            self.period += (since - self.period) * PERIOD_WEIGHT;
+        }
         self.last = Some(now);
 
         // Gravity: twist (about the pointing axis) and pitch, when not being shaken.
@@ -395,7 +444,7 @@ impl Pointer {
         }
         if self.bar_mode && self.bar_seen.is_some_and(|t| now.duration_since(t) > BAR_GONE) {
             self.bar_mode = false;
-            self.pitch = None;
+            self.orient = None;
             journal::note!("no sensor bar for {} s, the MotionPlus points again", BAR_GONE.as_secs());
         }
         if self.bar_mode {
@@ -404,38 +453,38 @@ impl Pointer {
             return Seen { pos: bar_pos, source: bar_pos.map(|_| Source::Bar), game: ForGame::Real };
         }
 
-        // No bar: the gyroscope, turns about the screen's vertical and horizontal, roll
-        // taken out. It turns about the accelerometer's axes: pitch about x, yaw about z,
-        // both counted the same way (Dolphin's MotionPlus.cpp, sign_fix -1 +1 -1); held
-        // level, + yaw turns right and + pitch raises the nose (checked on a real remote).
-        // Twisted by t, gravity is (sin t, ·, cos t) in x and z: a turn about it shows as
-        // yaw·cos t + pitch·sin t, one about the horizontal as pitch·cos t − yaw·sin t.
-        if let Some(r) = self.rate {
-            self.vote_axes(r, tilt_up, g, dt);
-        }
+        // No bar: the MotionPlus, as Dolphin's IMU pointer. Its rates are turned into ones
+        // about the accelerometer's axes (MotionPlus.cpp: the calibration's sign, then pitch
+        // and yaw counted against the right-hand rule, sign_fix −1 +1 −1), slow ones dropped;
+        // the remote's orientation follows them, gravity straightens its pitch and roll, and
+        // a turn past a side edge brings the screen along. Yaw and pitch then point, the roll
+        // only turns the game's dots, as a real bar's would.
         let turn = self.rate.map(|r| {
-            let (s, c) = self.twist.sin_cos();
-            let r = r.map(|v| v * self.axes);
-            let (right, up) = (r[YAW] * c + r[PITCH] * s, r[PITCH] * c - r[YAW] * s);
-            let m2 = right * right + up * up;
-            let k = m2 / (m2 + DEADZONE * DEADZONE);
-            let mut dv = up * k * dt;
-            // The vertical angle drifts back to gravity's, unless swinging.
-            let pitch = self.pitch.unwrap_or(tilt_up);
-            let mut next = pitch + dv;
-            if level && up.abs() < 30.0 {
-                next += (tilt_up - next) * (dt / PITCH_TAU).min(1.0);
+            let dt = self.period;
+            let w = [-r[PITCH], r[ROLL], -r[YAW]].map(|v| if v.abs() > DEADZONE { v.to_radians() } else { 0.0 });
+            let up = (0.5..1.5).contains(&g).then(|| a.map(|v| v / g));
+            let mut q = match self.orient {
+                Some(q) => Quat::turn(w.map(|v| -v * dt)).then(q),
+                // Facing the screen's centre, tilted as gravity says.
+                None => up.map_or(Quat::IDENTITY, |up| Quat::IDENTITY.toward(up, 1.0)).with_yaw(0.0),
+            };
+            if let Some(up) = up {
+                q = q.toward(up, 1.0 - (1.0 - ACCEL_WEIGHT).powf(dt / ACCEL_EVERY));
             }
-            dv = next - pitch;
-            self.pitch = Some(next);
-            (right * k * dt * 2.0 / GYRO_SPAN.0, -dv * 2.0 / GYRO_SPAN.1)
+            let edge = GYRO_EDGE.0.to_radians();
+            let yaw = q.yaw();
+            if yaw.abs() > edge {
+                q = q.with_yaw(yaw.clamp(-edge, edge));
+            }
+            let q = q.normalized();
+            self.orient = Some(q);
+            ((q.yaw() / edge).clamp(-1.0, 1.0), q.pitch() / GYRO_EDGE.1.to_radians(), q.roll())
         });
 
-        if let Some((dx, dy)) = turn {
-            let (x, y) = self.pos.unwrap_or((0.0, 0.0));
-            let pos = ((x + dx).clamp(-1.0, 1.0), (y + dy).clamp(-1.0, 1.0));
+        if let Some((x, y, roll)) = turn {
+            let pos = (x, y);
             self.pos = Some(pos);
-            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: self.for_game(pos) };
+            return Seen { pos: Some(pos), source: Some(Source::Gyro), game: self.for_game(pos, roll) };
         }
 
         if self.tilt && motion.is_none() {
@@ -445,7 +494,7 @@ impl Pointer {
                 (-(tilt_up - zero) / TILT_SPAN.1).clamp(-1.0, 1.0),
             );
             self.pos = Some(pos);
-            return Seen { pos: Some(pos), source: Some(Source::Tilt), game: self.for_game(pos) };
+            return Seen { pos: Some(pos), source: Some(Source::Tilt), game: self.for_game(pos, self.twist) };
         }
         self.tilt_zero = None;
         Seen { pos: None, source: None, game: ForGame::Nothing }
@@ -489,12 +538,10 @@ mod trace {
             (Some(b), sure) => l += &format!(" rest={:.1},{:.1},{:.1}{}", b[0], b[1], b[2], if sure { "T" } else { "H" }),
             (None, _) => l += " rest=-",
         }
-        if let Some(pitch) = p.pitch {
-            l += &format!(" pitch={pitch:+.1}");
+        if let Some(q) = p.orient {
+            l += &format!(" ori={:+.1},{:+.1},{:+.1}", q.yaw().to_degrees(), q.pitch().to_degrees(), q.roll().to_degrees());
         }
-        if p.axes < 0.0 {
-            l += " axes=turned";
-        }
+        l += &format!(" every={:.1}", p.period * 1000.0);
         l += &format!(" mode={} src={}", if p.bar_mode { "bar" } else { "motion" }, seen.source.map_or("-", |s| s.name()));
         if let Some((x, y)) = seen.pos {
             l += &format!(" pos={x:+.3},{y:+.3}");
@@ -567,7 +614,7 @@ mod tests {
         assert_eq!(d[1].0 - d[0].0, SPACING as u16);
         // A bar learned too far for KPAD still gives it one it takes.
         p.spacing = 50.0;
-        let ForGame::Dots(d, _) = p.for_game((0.0, 0.0)) else { unreachable!() };
+        let ForGame::Dots(d, _) = p.for_game((0.0, 0.0), 0.0) else { unreachable!() };
         assert_eq!(d[1].0 - d[0].0, GAME_SPACING.0 as u16);
     }
 
@@ -705,21 +752,21 @@ mod tests {
             p.update(&[], rolled, Some(&mp([8192; 3])), now);
         }
         let start = p.pos.unwrap();
-        // The turn shows on the pitch gyroscope now (twist +90°: + pitch is right).
+        // Turning right spins about −x now, which the pitch gyroscope sees.
         for _ in 0..20 {
             now += Duration::from_millis(10);
-            p.update(&[], rolled, Some(&mp([8192, 8192, 8192 + 161])), now);
+            p.update(&[], rolled, Some(&mp_for([-10.0, 0.0, 0.0])), now);
         }
         let end = p.pos.unwrap();
         assert!(end.0 - start.0 > 0.05 && (end.1 - start.1).abs() < 0.02, "{start:?} {end:?}");
     }
 
-    /// A MotionPlus sample for an angular velocity (°/s) about the accelerometer's x y z,
-    /// as a real one gives it (Dolphin's MotionPlus.cpp: pitch and yaw counted against
-    /// that frame's right-hand rule): independent of how the pointer reads it.
+    /// A MotionPlus sample for an angular velocity (°/s) about the accelerometer's x (left)
+    /// y (back) z (up), right-hand rule, as one with Dolphin's calibration gives it
+    /// (MotionPlus.cpp: sign_fix −1 +1 −1 against yaw and pitch scales below their zero).
     fn mp_for(w: [f32; 3]) -> MotionPlus {
         let raw = |rate: f32| (8192.0 + rate * 4352.0 / 270.0).round() as u16;
-        mp([raw(-w[2]), raw(w[1]), raw(-w[0])])
+        mp([raw(w[2]), raw(w[1]), raw(w[0])])
     }
 
     #[test]
@@ -727,8 +774,7 @@ mod tests {
         for deg in [-30.0f32, 15.0, 25.0, 45.0] {
             let (s, c) = deg.to_radians().sin_cos();
             // Gravity u = (sin t, 0, cos t); across the remote h = (cos t, 0, -sin t). Turning
-            // right spins about −u (+ yaw, level), raising the nose about −h (+ pitch, level:
-            // measured on a real remote).
+            // right spins about −u, raising the nose about −h (a lamp in a tester's camera).
             let held = [(512.0 + 104.0 * s).round() as u16, 512, (512.0 + 104.0 * c).round() as u16];
             let turn = |right: f32, up: f32| mp_for([-right * s - up * c, 0.0, -right * c + up * s]);
             let mut now = Instant::now();
@@ -779,53 +825,50 @@ mod tests {
         assert!((held - up).abs() < 0.05, "{up} {held}");
     }
 
+    /// A tester's external MotionPlus counts yaw and pitch the other way from another remote's:
+    /// its calibration says so, as Dolphin reads it, and both point the same.
     #[test]
-    fn a_motion_plus_counting_the_other_way_is_turned_back_by_gravity() {
+    fn a_motion_plus_counting_the_other_way_says_so_in_its_calibration() {
         let mut now = Instant::now();
-        let mut p = calibrated(&mut now);
-        // Mounted turned half round the pointing axis: x and z the other way.
-        let turned = |w: [f32; 3]| mp_for([-w[0], w[1], -w[2]]);
-        let raised = |deg: f32| {
-            let (s, c) = deg.to_radians().sin_cos();
-            [512, (512.0 - 104.0 * s).round() as u16, (512.0 + 104.0 * c).round() as u16]
-        };
-        // Up and down by 10° a few times, as anyone pointing does.
-        for _ in 0..4 {
-            for (from, rate) in [(0.0, 20.0), (10.0, -20.0)] {
-                for i in 0..50 {
-                    now += Duration::from_millis(10);
-                    let deg = from + rate * i as f32 * 0.01;
-                    p.update(&[], raised(deg), Some(&turned([-rate, 0.0, 0.0])), now);
-                }
+        let (mut usual, mut other) = (Pointer::default(), Pointer::default());
+        other.gyro.cal.units = other.gyro.cal.units.map(|u| u.map(f32::abs));
+        let flipped = |m: MotionPlus| MotionPlus { raw: [16384 - m.raw[0], m.raw[1], 16384 - m.raw[2]], ..m };
+        for _ in 0..40 {
+            now += Duration::from_millis(10);
+            usual.update(&[], LEVEL, Some(&mp([8192; 3])), now);
+            other.update(&[], LEVEL, Some(&flipped(mp([8192; 3]))), now);
+        }
+        // Right and up at once, then left.
+        for w in [[-15.0, 0.0, -20.0], [0.0, 0.0, 30.0]] {
+            for _ in 0..30 {
+                now += Duration::from_millis(10);
+                let a = usual.update(&[], LEVEL, Some(&mp_for(w)), now).pos.unwrap();
+                let b = other.update(&[], LEVEL, Some(&flipped(mp_for(w))), now).pos.unwrap();
+                assert!((a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3, "{a:?} {b:?}");
             }
         }
-        assert_eq!(p.axes, -1.0);
-        // Turning right goes right now.
-        let start = p.pos.unwrap().0;
-        for _ in 0..30 {
-            now += Duration::from_millis(10);
-            p.update(&[], LEVEL, Some(&turned([0.0, 0.0, -20.0])), now);
-        }
-        assert!(p.pos.unwrap().0 - start > 0.25, "{start} {:?}", p.pos);
+        // 6° right and 4.5° up (gravity, which feels the remote level, pulling that back), then 9° left.
+        let end = usual.pos.unwrap();
+        assert!((end.0 + 3.0 / 12.5).abs() < 0.02 && end.1 < -0.05, "{end:?}");
     }
 
+    /// Reports come two at a time on some machines: the pointer still moves evenly.
     #[test]
-    fn a_usual_motion_plus_stays_as_it_is() {
+    fn reports_in_bursts_move_it_evenly() {
         let mut now = Instant::now();
         let mut p = calibrated(&mut now);
-        let raised = |deg: f32| {
-            let (s, c) = deg.to_radians().sin_cos();
-            [512, (512.0 - 104.0 * s).round() as u16, (512.0 + 104.0 * c).round() as u16]
-        };
-        for _ in 0..4 {
-            for (from, rate) in [(0.0, 20.0), (10.0, -20.0)] {
-                for i in 0..50 {
-                    now += Duration::from_millis(10);
-                    p.update(&[], raised(from + rate * i as f32 * 0.01), Some(&mp_for([-rate, 0.0, 0.0])), now);
-                }
-            }
+        let mut steps = Vec::new();
+        // Fewer than a calibration window: a synthetic turn is steadier than any hand.
+        for i in 0..30 {
+            now += Duration::from_millis(if i % 2 == 0 { 2 } else { 18 });
+            let x = p.pos.unwrap().0;
+            p.update(&[], LEVEL, Some(&mp_for([0.0, 0.0, -20.0])), now);
+            steps.push(p.pos.unwrap().0 - x);
         }
-        assert_eq!((p.axes, p.votes), (1.0, AXES_VOTES));
+        let (lo, hi) = steps.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &d| (lo.min(d), hi.max(d)));
+        assert!(lo > 0.0 && hi < lo * 1.05, "{steps:?}");
+        // As far as 0.3 s at 20°/s takes it.
+        assert!((p.pos.unwrap().0 - 6.0 / 12.5).abs() < 0.02, "{:?}", p.pos);
     }
 
     /// Replays a remote's journal (wp-wiimote.log, from someone's machine) through the pointer:
@@ -836,8 +879,19 @@ mod tests {
         let path = std::env::var("WP_JOURNAL").expect("WP_JOURNAL=path to a wp-wiimote.log");
         let start = Instant::now();
         let mut p = Pointer::default();
-        let (mut last_axes, mut last_votes) = (p.axes, p.votes);
+        let mut second = -1.0;
         for line in std::fs::read_to_string(path).unwrap().lines() {
+            // "# calibration: … units/°/s slow [y, r, p]; accelerometer zero [x, y, z] 1 g [x, y, z]; …"
+            let list = |key: &str| -> Option<[f32; 3]> {
+                let v: Vec<f32> = line.split(key).nth(1)?.split(['[', ']']).nth(1)?.split(", ").filter_map(|v| v.parse().ok()).collect();
+                v.try_into().ok()
+            };
+            if let (Some(slow), Some(zero), Some(one_g)) = (list("units/°/s slow "), list("accelerometer zero "), list(" 1 g ")) {
+                // The journal has them unsigned: the signs Dolphin's and the testers' remotes have.
+                p.gyro.cal.units[1] = [-slow[0], slow[1], -slow[2]];
+                p.accel_cal = AccelCal { zero, one_g };
+                continue;
+            }
             let field = |key: &str| line.split(' ').find_map(|w| w.strip_prefix(key));
             let (Some(acc), Some(mp)) = (field("acc="), field("mp=")) else { continue };
             let t: f32 = line.split_whitespace().next().unwrap().parse().unwrap();
@@ -855,25 +909,28 @@ mod tests {
                 .filter_map(|w| w.strip_prefix('(')?.strip_suffix(')')?.split_once(','))
                 .filter_map(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
                 .collect();
-            p.update(&dots, [accel[0], accel[1], accel[2]], motion.as_ref(), start + Duration::from_secs_f32(t));
-            if (p.axes, p.votes) != (last_axes, last_votes) {
-                println!("{t:9.3} axes {:+} votes {:+}", p.axes, p.votes);
-                (last_axes, last_votes) = (p.axes, p.votes);
+            let seen = p.update(&dots, [accel[0], accel[1], accel[2]], motion.as_ref(), start + Duration::from_secs_f32(t));
+            if t.floor() != second {
+                second = t.floor();
+                let ori = p.orient.map(|q| [q.yaw(), q.pitch(), q.roll()].map(f32::to_degrees));
+                let a: [f32; 3] = std::array::from_fn(|i| (accel[i] as f32 - p.accel_cal.zero[i]) / p.accel_cal.one_g[i]);
+                let gravity = [a[1].atan2(a[0].hypot(a[2])), a[0].atan2(a[2])].map(f32::to_degrees);
+                println!("{t:9.3} {:?} {:?} ori {ori:.1?} gravity {gravity:.1?} every {:.1} ms", seen.source, seen.pos, p.period * 1000.0);
             }
         }
-        println!("end: axes {} votes {} spacing {}", p.axes, p.votes, p.spacing);
+        println!("end: spacing {}", p.spacing);
     }
 
     #[test]
     fn vertical_drift_is_pulled_back_by_gravity() {
         let mut now = Instant::now();
         let mut p = calibrated(&mut now);
-        // Pitch gyroscope 1.5°/s off (warming up), remote level and still: y stays put.
+        // Pitch gyroscope 3°/s off (warming up), remote level and still: y stays put.
         for _ in 0..1000 {
             now += Duration::from_millis(10);
-            p.update(&[], LEVEL, Some(&mp([8192, 8192, 8192 + 24])), now);
+            p.update(&[], LEVEL, Some(&mp([8192, 8192, 8192 + 48])), now);
         }
-        assert!(p.pos.unwrap().1.abs() < 0.12, "{:?}", p.pos);
+        assert!(p.pos.unwrap().1.abs() < 0.1, "{:?}", p.pos);
     }
 
     #[test]
@@ -882,12 +939,12 @@ mod tests {
         let mut p = calibrated(&mut now);
         for _ in 0..300 {
             now += Duration::from_millis(10);
-            p.update(&[], LEVEL, Some(&mp([8192 + 1000, 8192, 8192])), now);
+            p.update(&[], LEVEL, Some(&mp_for([0.0, 0.0, -60.0])), now);
         }
-        assert_eq!(p.pos.unwrap().0, 1.0);
+        assert!((p.pos.unwrap().0 - 1.0).abs() < 1e-4, "{:?}", p.pos);
         // Turning back moves it at once ("lifting the mouse").
         now += Duration::from_millis(10);
-        p.update(&[], LEVEL, Some(&mp([8192 - 1000, 8192, 8192])), now);
+        p.update(&[], LEVEL, Some(&mp_for([0.0, 0.0, 60.0])), now);
         assert!(p.pos.unwrap().0 < 1.0);
     }
 

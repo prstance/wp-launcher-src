@@ -598,29 +598,40 @@ mod tests {
     fn held(x: u8, z: u8) -> Vec<u8> {
         let mut r = report(NO_IR);
         r[4] = x;
+        r[5] = 0x80;
         r[6] = z;
         r
+    }
+
+    /// The gyroscope's dots once the remote has been held that way for a second.
+    fn held_dots(p: &mut Proxy, r: &[u8], now: &mut Instant) -> [(u16, u16); 2] {
+        for _ in 0..99 {
+            *now += Duration::from_millis(10);
+            p.from_remote(r, *now);
+        }
+        *now += Duration::from_millis(10);
+        gyro_dots(p, r, *now)
     }
 
     #[test]
     fn the_twist_turns_the_dots_the_gyroscope_makes() {
         let mut p = Proxy::new(true, Pointer::default());
         game_set_up(&mut p, 0x33);
-        let now = calibrated(&mut p, Instant::now());
+        let mut now = calibrated(&mut p, Instant::now());
         // Face up: level, as before.
-        let level = gyro_dots(&mut p, &held(0x80, 0x9A), now);
+        let level = held_dots(&mut p, &held(0x80, 0x9A), &mut now);
         assert_eq!(level, [(442, 452), (582, 452)]);
         // Twisted as Dolphin's emulated remote is with a positive roll (x below its zero):
         // the left dot goes down the camera and the right one up, around the camera's middle.
-        let [left, right] = gyro_dots(&mut p, &held(0x78, 0x98), now);
+        let [left, right] = held_dots(&mut p, &held(0x78, 0x98), &mut now);
         assert!(left.1 > right.1, "{left:?} {right:?}");
         let apart = ((right.0 as f32 - left.0 as f32).powi(2) + (right.1 as f32 - left.1 as f32).powi(2)).sqrt();
         assert!((apart - pointer::SPACING).abs() < 2.0, "{apart}");
-        // Pointing up or down, gravity says nothing about the twist: it stays.
-        let [l, r] = gyro_dots(&mut p, &held(0x80, 0x80), now);
+        // Swung (not 1 g), gravity says nothing about the twist: it stays.
+        let [l, r] = held_dots(&mut p, &held(0x80, 0x80), &mut now);
         assert!(l.1 > r.1);
         // Twisted the other way.
-        let [left, right] = gyro_dots(&mut p, &held(0x88, 0x98), now);
+        let [left, right] = held_dots(&mut p, &held(0x88, 0x98), &mut now);
         assert!(left.1 < right.1);
     }
 
