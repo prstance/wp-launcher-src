@@ -3,8 +3,7 @@
   // the game. "#/ModDetail/<id>" (src-tauri/src/mods.rs, package_detail).
   import { invoke } from '@tauri-apps/api/core';
   import Sidebar from '../components/Sidebar.svelte';
-  import Select from '../components/Select.svelte';
-  import MiiSetting from '../components/MiiSetting.svelte';
+  import SettingRow from '../components/SettingRow.svelte';
   import Notes from '../components/Notes.svelte';
   import { inTauri } from '../lib/tauri.js';
   import { router } from '../lib/router.svelte.js';
@@ -67,34 +66,6 @@
     save(Object.fromEntries(detail.settings.map((s) => [s.id, s.value])));
   };
 
-  /** A preset's "custom" choice (no `sets`) is only shown while it is the one. */
-  const offered = (s) => {
-    const preset = s.choices.some((c) => c.sets);
-    return s.choices.filter((c) => !preset || c.sets || c.value === s.value).map((c) => [c.value, local(c.label)]);
-  };
-
-  const step = (setting, direction) => {
-    const next = +(setting.value + direction * (setting.step || 1)).toFixed(10);
-    change(setting, Math.min(setting.max ?? Infinity, Math.max(setting.min ?? -Infinity, next)));
-  };
-
-  /** A number typed in its field: kept within its bounds, on its steps; anything else puts the value back. */
-  const typed = (setting, input) => {
-    const raw = Number(input.value.replace(/[\s  ]/g, '').replace(',', '.'));
-    if (input.value.trim() === '' || !Number.isFinite(raw)) {
-      input.value = setting.value;
-      return;
-    }
-    const min = setting.min ?? 0;
-    const unit = setting.step || 1;
-    const value = Math.min(setting.max ?? Infinity, Math.max(min, +(min + Math.round((raw - min) / unit) * unit).toFixed(10)));
-    input.value = value;
-    if (value !== setting.value) change(setting, value);
-  };
-
-  /** The field's width: the widest value it can hold. */
-  const digits = (s) => Math.max(String(s.min ?? 0).length, String(s.max ?? s.value).length, 2);
-
   const enable = () => attempt(async () => (isVersion ? activateVersion(id) : setModEnabled(id, !detail.enabled)).then(load));
 
   const remove = () =>
@@ -116,30 +87,6 @@
 
 {#snippet note(level, text)}
   <p role={level === 'error' ? 'alert' : 'status'} style="margin: 0; padding: 8px 14px; border-radius: 14px; background: {level === 'error' ? '#fde0e0' : level === 'ok' ? '#d9f0dd' : '#f8e6c6'}; font-size: 13px; font-weight: 700; color: {level === 'error' ? '#7a1424' : level === 'ok' ? '#17532a' : '#6b4100'}; overflow-wrap: anywhere;">{text}</p>
-{/snippet}
-
-{#snippet setting(s, last)}
-  <div style="display: flex; align-items: center; gap: 16px; padding: 11px 0; box-shadow: {last ? 'none' : 'inset 0 -2px 0 var(--surface)'};">
-    <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
-      <span style="font-size: 15px; font-weight: 800;">{local(s.label)}</span>
-      {#if s.description}
-        <span style="font-size: 12px; font-weight: 700; color: var(--muted); overflow-wrap: anywhere;">{local(s.description)}</span>
-      {/if}
-    </span>
-    {#if s.type === 'toggle'}
-      <button type="button" role="switch" aria-checked={!!s.value} aria-label={local(s.label)} disabled={busy} onclick={() => change(s, s.value ? 0 : 1)} style="position: relative; flex-shrink: 0; width: 52px; height: 30px; border: 0; border-radius: 999px; cursor: pointer; background: {s.value ? '#25a720' : 'var(--off)'};"><span style="position: absolute; top: 4px; left: {s.value ? 26 : 4}px; width: 22px; height: 22px; border-radius: 999px; background: #ffffff; box-shadow: 0 2px 0 rgba(0,0,0,0.15);"></span></button>
-    {:else if s.type === 'choice'}
-      <Select label={local(s.label)} value={s.value} options={offered(s)} onchange={(v) => change(s, v)} />
-    {:else if s.type === 'mii'}
-      <MiiSetting setting={s} {busy} onchange={change} />
-    {:else}
-      <span role="group" aria-label={local(s.label)} style="flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 12px; background: var(--surface);">
-        <button type="button" class="step" aria-label={t('Moins')} disabled={busy || s.value <= (s.min ?? -Infinity)} onclick={() => step(s, -1)}>−</button>
-        <input class="number" type="text" inputmode="numeric" aria-label={local(s.label)} disabled={busy} value={s.value} onchange={(e) => typed(s, e.currentTarget)} onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} style="width: calc({digits(s)}ch + 16px);" />
-        <button type="button" class="step" aria-label={t('Plus')} disabled={busy || s.value >= (s.max ?? Infinity)} onclick={() => step(s, 1)}>+</button>
-      </span>
-    {/if}
-  </div>
 {/snippet}
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
@@ -203,7 +150,7 @@
             {#if detail.settings.length}
               <div style="display: flex; flex-direction: column;">
                 {#each detail.settings as s, i (s.id)}
-                  {@render setting(s, i === detail.settings.length - 1)}
+                  <SettingRow setting={s} last={i === detail.settings.length - 1} {busy} onchange={change} />
                 {/each}
               </div>
               <div style="display: flex; align-items: center; gap: 12px;">
@@ -262,42 +209,4 @@
 <style>
   a { color:var(--label); }
   a:hover { color:var(--accent-deep); }
-  .step {
-    width: 30px;
-    height: 30px;
-    border: 0;
-    border-radius: 9px;
-    cursor: pointer;
-    background: #ffffff;
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--text);
-  }
-  .step:disabled {
-    cursor: default;
-    opacity: 0.4;
-  }
-  .number {
-    box-sizing: border-box;
-    min-width: 48px;
-    height: 30px;
-    padding: 0 8px;
-    border: 2px solid transparent;
-    border-radius: 9px;
-    background: transparent;
-    text-align: center;
-    font: inherit;
-    font-size: 14px;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    color: var(--text);
-  }
-  .number:hover:not(:disabled) {
-    background: #ffffff;
-  }
-  .number:focus {
-    outline: none;
-    border-color: var(--accent);
-    background: #ffffff;
-  }
 </style>

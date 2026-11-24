@@ -12,7 +12,7 @@
     const onSh = 'inset 0 3px 0 rgba(255,255,255,0.45), 0 4px 0 var(--accent-deep)';
     const idle = 'var(--muted)';
     const pick = (k) => a === k ? { bg: onBg, fg: '#ffffff', sh: onSh } : { bg: 'transparent', fg: idle, sh: 'none' };
-    const h = pick('home'), m = pick('miis'), l = pick('library'), v = pick('versions'), p = pick('pads'), s = pick('settings');
+    const h = pick('home'), m = pick('miis'), l = pick('library'), v = pick('versions'), p = pick('pads'), s = pick('settings'), d = pick('debug');
     return {
       railBg: 'var(--rail)',
       railLine: 'var(--rail-line)',
@@ -25,7 +25,8 @@
       libBg: l.bg, libFg: l.fg, libSh: l.sh,
       verBg: v.bg, verFg: v.fg, verSh: v.sh,
       padBg: p.bg, padFg: p.fg, padSh: p.sh,
-      setBg: s.bg, setFg: s.fg, setSh: s.sh
+      setBg: s.bg, setFg: s.fg, setSh: s.sh,
+      dbgBg: d.bg, dbgFg: d.fg, dbgSh: d.sh
     };
   });
 </script>
@@ -57,6 +58,12 @@
     <a href="#/Settings" aria-label={t('Paramètres')} aria-current={(props.active ?? 'home') === 'settings' ? 'page' : undefined} title={t('Paramètres')} style="width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; background: {v.setBg}; color: {v.setFg}; box-shadow: {v.setSh};">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8"></path></svg>
     </a>
+    {#if settings.dev}
+      <!-- (the launcher in development only: its test tools, screens/Debug.svelte) -->
+      <a href="#/Debug" aria-label={t('Debug')} aria-current={props.active === 'debug' ? 'page' : undefined} title={t('Debug')} style="width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; background: {v.dbgBg}; color: {v.dbgFg}; box-shadow: {v.dbgSh};">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="7" width="10" height="13" rx="5"></rect><path d="M9.5 7.5a2.5 2.5 0 0 1 5 0M12 11v9M7 12H3.5M20.5 12H17M7.5 17l-3 2M16.5 17l3 2M7.5 8.5l-3-2M16.5 8.5l3-2"></path></svg>
+      </a>
+    {/if}
   </div>
 
 </nav>

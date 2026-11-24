@@ -169,7 +169,7 @@ pub fn refresh(app: &AppHandle) {
 fn summary(app: &AppHandle, settings: &Settings) -> String {
     let version = versions::active(app, settings).ok().flatten();
     let packages = mods::launch_packages(app, settings).unwrap_or_default();
-    let n = packages.iter().filter(|p| Some(&p.manifest.id) != settings.active_version.as_ref()).count();
+    let n = packages.iter().filter(|p| Some(&p.manifest.id) != settings.active_version.as_ref() && p.manifest.id != mods::DEBUG_TOOLS).count();
     let mods = match n {
         0 => tr!("sans mod"),
         1 => tr!("1 mod"),

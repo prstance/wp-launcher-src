@@ -21,6 +21,7 @@ export const settings = $state({
   discordPresence: true,
   language: "auto", // "fr", "en", "es" or "auto" (lib/i18n.svelte.js)
   autostart: false,
+  dev: false, // the launcher in development: its Debug page (screens/Debug.svelte)
 });
 
 const apply = (next) => {

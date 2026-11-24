@@ -62,6 +62,8 @@ fn main() {
             mods::mods_remove,
             mods::package_detail,
             mods::package_settings_set,
+            mods::debug_state,
+            mods::debug_settings_set,
             mii::miis_state,
             mii::miis_disc,
             mii::miis_adopt,

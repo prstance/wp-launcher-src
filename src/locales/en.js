@@ -345,4 +345,8 @@ export default {
   "Mii introuvable": "Mii not found",
   "Choisis un Mii": "Choose a Mii",
   "Pas encore de Mii à toi : ajoute-les dans Mes Mii.": "No Miis of your own yet: add them in My Miis.",
+  "Debug": "Debug",
+  "Le launcher en développement seulement. Les outils s’appliquent au prochain lancement du jeu.": "Only in the launcher in development. The tools apply the next time the game starts.",
+  "Tout désactiver": "Turn all off",
+  "Aucun outil de test : src-tauri/debug est vide.": "No test tools: src-tauri/debug is empty.",
 };

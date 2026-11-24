@@ -1,0 +1,187 @@
+{
+  "format": 1,
+  "id": "partylauncher.debug",
+  "name": {
+    "fr": "Outils de test",
+    "en": "Test tools",
+    "es": "Herramientas de prueba"
+  },
+  "version": "1.0.0",
+  "authors": [
+    "prstance"
+  ],
+  "description": {
+    "fr": "Les outils de test du launcher en développement : sur le plateau, mini-jeux sautés, dés choisis à la croix, mini-jeu imposé.",
+    "en": "The launcher's test tools in development: on the board, minigames skipped, dice picked with the D-pad, a minigame drawn on purpose.",
+    "es": "Las herramientas de prueba del launcher en desarrollo: en el tablero, minijuegos saltados, dados elegidos con la cruceta, un minijuego impuesto."
+  },
+  "games": [
+    "SUPP01"
+  ],
+  "settings": [
+    {
+      "id": "mini-jeux",
+      "type": "choice",
+      "debug": true,
+      "label": {
+        "fr": "Sauter les mini-jeux",
+        "en": "Skip the minigames",
+        "es": "Saltar los minijuegos"
+      },
+      "description": {
+        "fr": "Sur le plateau : le résultat est écrit sans jouer, puis la partie continue",
+        "en": "On the board: the result is written without playing, then the game goes on",
+        "es": "En el tablero: el resultado se escribe sin jugar y la partida sigue"
+      },
+      "default": 0,
+      "choices": [
+        {
+          "value": 0,
+          "label": {
+            "fr": "Non",
+            "en": "No",
+            "es": "No"
+          }
+        },
+        {
+          "value": 1,
+          "label": {
+            "fr": "Tous",
+            "en": "All of them",
+            "es": "Todos"
+          }
+        },
+        {
+          "value": 2,
+          "label": {
+            "fr": "Ceux de fin de manche",
+            "en": "The rounds' ones",
+            "es": "Los de fin de ronda"
+          }
+        },
+        {
+          "value": 3,
+          "label": {
+            "fr": "Ceux des cases (duels, 1 contre 3)",
+            "en": "The spaces' ones (duels, 1 vs 3)",
+            "es": "Los de las casillas (duelos, 1 contra 3)"
+          }
+        }
+      ],
+      "symbol": {
+        "module": "mr001",
+        "name": "gDebugSkip",
+        "size": 4
+      }
+    },
+    {
+      "id": "resultat",
+      "type": "choice",
+      "debug": true,
+      "label": {
+        "fr": "Résultat des mini-jeux sautés",
+        "en": "Result of the skipped minigames",
+        "es": "Resultado de los minijuegos saltados"
+      },
+      "default": 0,
+      "choices": [
+        {
+          "value": 0,
+          "label": {
+            "fr": "Au hasard",
+            "en": "Random",
+            "es": "Al azar"
+          }
+        },
+        {
+          "value": 1,
+          "label": {
+            "fr": "Le joueur 1 gagne",
+            "en": "Player 1 wins",
+            "es": "Gana el jugador 1"
+          }
+        },
+        {
+          "value": 2,
+          "label": {
+            "fr": "Le joueur 1 perd",
+            "en": "Player 1 loses",
+            "es": "Pierde el jugador 1"
+          }
+        }
+      ],
+      "symbol": {
+        "module": "mr001",
+        "name": "gDebugSkipResult",
+        "size": 4
+      }
+    },
+    {
+      "id": "des",
+      "type": "toggle",
+      "debug": true,
+      "label": {
+        "fr": "Choisir les dés à la croix",
+        "en": "Pick the dice with the D-pad",
+        "es": "Elegir los dados con la cruceta"
+      },
+      "description": {
+        "fr": "Pendant que les dés tournent : ↑ / ↓ choisit le total, puis A. Lancer de déplacement seulement",
+        "en": "While the dice spin: ↑ / ↓ picks the total, then A. Movement rolls only",
+        "es": "Mientras giran los dados: ↑ / ↓ elige el total, luego A. Solo la tirada para avanzar"
+      },
+      "default": 0,
+      "symbol": {
+        "module": "mr001",
+        "name": "gDebugDice",
+        "size": 4
+      }
+    },
+    {
+      "id": "mini-jeu",
+      "type": "number",
+      "debug": true,
+      "label": {
+        "fr": "Mini-jeu imposé",
+        "en": "Minigame drawn",
+        "es": "Minijuego impuesto"
+      },
+      "description": {
+        "fr": "Son numéro (305, 444…), tiré quand il est du type demandé (4 joueurs, duel…). 0 : tirage normal",
+        "en": "Its number (305, 444…), drawn when it is of the kind wanted (4 players, duel…). 0: the usual draw",
+        "es": "Su número (305, 444…), elegido cuando es del tipo pedido (4 jugadores, duelo…). 0: sorteo normal"
+      },
+      "default": 0,
+      "min": 0,
+      "max": 999,
+      "step": 1,
+      "symbol": {
+        "module": "mr001",
+        "name": "gDebugMinigame",
+        "size": 4
+      }
+    }
+  ],
+  "launcher": ">=0.3",
+  "patches": [
+    {
+      "type": "code",
+      "modules": {
+        "mr001": {
+          "objects": [
+            "code/mr001/debug.o"
+          ],
+          "hooks": {
+            "Player_moveDice": "Debug_moveDice",
+            "Player_moveRolled": "Debug_moveRolled",
+            "Dice_rollWait": "Debug_rollWait",
+            "Dice_rollThrown": "Debug_rollThrown",
+            "Dice_face": "Debug_face",
+            "Minigame_pick": "Debug_minigamePick",
+            "Minigame_skip": "Debug_minigameSkip"
+          }
+        }
+      }
+    }
+  ]
+}

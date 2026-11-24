@@ -7,6 +7,10 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_autostart::ManagerExt;
 
+/// The launcher runs in development (`npm run tauri dev`, a debug build): it then has its Debug page,
+/// where the packages' debug settings are (mods.rs).
+pub const DEV: bool = cfg!(debug_assertions);
+
 /// A Wii Party disc image the player picked.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +70,9 @@ pub struct Settings {
     /// Lives in the system's autostart entry; only mirrored here for the UI.
     #[serde(skip_deserializing)]
     pub autostart: bool,
+    /// DEV, for the UI.
+    #[serde(skip_deserializing)]
+    pub dev: bool,
 }
 
 impl Default for Settings {
@@ -92,6 +99,7 @@ impl Default for Settings {
             package_settings: Default::default(),
             active_version: Some(crate::versions::FIRST.to_string()),
             autostart: false,
+            dev: false,
         }
     }
 }
@@ -145,6 +153,7 @@ pub fn for_ui(app: &AppHandle, mut settings: Settings) -> Settings {
         settings.iso = None;
     }
     settings.autostart = app.autolaunch().is_enabled().unwrap_or(false);
+    settings.dev = DEV;
     settings
 }
 

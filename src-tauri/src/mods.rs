@@ -5,7 +5,7 @@
 use crate::game::{data_dir, is_playing};
 use crate::link;
 use crate::i18n::{tr, Text};
-use crate::settings::{Disc, Settings, Store};
+use crate::settings::{Disc, Settings, Store, DEV};
 use crate::versions::{self, Theme};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -167,6 +167,10 @@ struct Setting {
     /// Or written into a variable of the package's code (a "code" patch).
     #[serde(default)]
     symbol: Option<SymbolSlot>,
+    /// A test tool: on the launcher's Debug page in development, not on the package's page, and
+    /// always at its default otherwise.
+    #[serde(default)]
+    debug: bool,
 }
 
 /// `size` bytes at `offset` in the variable `name` of the mod's code in `module`.
@@ -260,8 +264,11 @@ impl Setting {
         }
     }
 
-    /// The saved value, unless the package no longer allows it.
+    /// The saved value, unless the package no longer allows it (or it is a test tool out of development).
     fn value(&self, saved: Option<&BTreeMap<String, i64>>) -> i64 {
+        if self.debug && !DEV {
+            return self.default;
+        }
         saved.and_then(|s| s.get(&self.id)).copied().filter(|v| self.allows(*v)).unwrap_or(self.default)
     }
 
@@ -411,8 +418,14 @@ impl Installed {
         data_url(&self.dir, self.manifest.icon.as_ref()?)
     }
 
+    /// Those on its page (not the test tools).
     pub fn settings_count(&self) -> usize {
-        self.manifest.settings.len()
+        self.manifest.settings.iter().filter(|s| !s.debug).count()
+    }
+
+    /// One of its test tools is on.
+    fn debug_on(&self) -> bool {
+        self.manifest.settings.iter().any(|s| s.debug && self.values.get(&s.id).is_some_and(|v| *v != s.default))
     }
 }
 
@@ -855,22 +868,37 @@ pub fn installed(kind: &Kind, dir: &Path, saved: &Values) -> Vec<Installed> {
         .flatten()
         .flatten()
         .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
-        .filter_map(|e| {
-            let dir = e.path();
-            let manifest = read_manifest(kind, &std::fs::read_to_string(dir.join(kind.manifest)).ok()?).ok()?;
-            let values = resolve(&manifest, saved);
-            let footprint = read_contents(kind, &dir, &manifest, &values).ok()?;
-            Some(Installed { manifest, dir, values, footprint })
-        })
+        .filter_map(|e| load(kind, e.path(), saved))
         .collect();
     mods.sort_by_key(|m| m.manifest.name.to_string().to_lowercase());
     mods
 }
 
-/// What the game starts with: the version first, so that mods apply on top of it.
-fn load_order<'a>(version: Option<&'a Installed>, mods: &'a [Installed], enabled: &[String]) -> Vec<&'a Installed> {
+/// The package unpacked in `dir`, if it is a valid one.
+fn load(kind: &Kind, dir: PathBuf, saved: &Values) -> Option<Installed> {
+    let manifest = read_manifest(kind, &std::fs::read_to_string(dir.join(kind.manifest)).ok()?).ok()?;
+    let values = resolve(&manifest, saved);
+    let footprint = read_contents(kind, &dir, &manifest, &values).ok()?;
+    Some(Installed { manifest, dir, values, footprint })
+}
+
+/// The id of the launcher's test tools.
+pub const DEBUG_TOOLS: &str = "partylauncher.debug";
+
+/// The launcher's test tools (wp-core mods/debug, unpacked in src-tauri/debug), in development only:
+/// their settings are on the Debug page.
+fn debug_tools(saved: &Values) -> Option<Installed> {
+    if !DEV {
+        return None;
+    }
+    load(&WPMOD, PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("debug"), saved).filter(|t| t.manifest.id == DEBUG_TOOLS)
+}
+
+/// What the game starts with: the version first, so that mods apply on top of it. The test tools,
+/// while one is on, come before it: their minigame draw and skip go first.
+fn load_order<'a>(tools: Option<&'a Installed>, version: Option<&'a Installed>, mods: &'a [Installed], enabled: &[String]) -> Vec<&'a Installed> {
     let enabled = enabled.iter().filter_map(|id| mods.iter().find(|m| &m.manifest.id == id));
-    version.into_iter().chain(enabled).collect()
+    tools.filter(|t| t.debug_on()).into_iter().chain(version).chain(enabled).collect()
 }
 
 pub fn size_of(dir: &Path) -> u64 {
@@ -1105,7 +1133,8 @@ fn check_with_code(mods: &[&Installed], game: Option<&str>, core: Option<&Path>)
 
 fn state(dir: &Path, version: Option<&Installed>, settings: &Settings, core: Option<&Path>) -> ModsState {
     let mods = installed(&WPMOD, dir, &settings.package_settings);
-    let order = load_order(version, &mods, &settings.enabled_mods);
+    let tools = debug_tools(&settings.package_settings);
+    let order = load_order(tools.as_ref(), version, &mods, &settings.enabled_mods);
     let problems = check_all(&order, settings.iso.as_ref().map(|d| d.game_id.as_str()), core);
     let views = mods
         .iter()
@@ -1128,7 +1157,8 @@ fn state(dir: &Path, version: Option<&Installed>, settings: &Settings, core: Opt
 /// The packages the game starts with, in their order (rebuild.rs).
 pub fn launch_packages(app: &AppHandle, settings: &Settings) -> Result<Vec<Installed>, String> {
     let mut mods = installed(&WPMOD, &data_dir(app, "mods")?, &settings.package_settings);
-    let mut order: Vec<Installed> = versions::active(app, settings)?.into_iter().collect();
+    let tools = debug_tools(&settings.package_settings).filter(Installed::debug_on);
+    let mut order: Vec<Installed> = tools.into_iter().chain(versions::active(app, settings)?).collect();
     for id in &settings.enabled_mods {
         if let Some(at) = mods.iter().position(|m| &m.manifest.id == id) {
             order.push(mods.remove(at));
@@ -1143,7 +1173,8 @@ pub fn boot_file(app: &AppHandle, disc: &Disc, settings: &Settings) -> Result<Op
     let dir = data_dir(app, "mods")?;
     let mods = installed(&WPMOD, &dir, &settings.package_settings);
     let version = versions::active(app, settings)?;
-    let order = load_order(version.as_ref(), &mods, &settings.enabled_mods);
+    let tools = debug_tools(&settings.package_settings);
+    let order = load_order(tools.as_ref(), version.as_ref(), &mods, &settings.enabled_mods);
     if order.is_empty() {
         return Ok(None);
     }
@@ -1432,8 +1463,54 @@ fn everything(app: &AppHandle, settings: &Settings) -> Result<(Vec<Installed>, V
     let mods = installed(&WPMOD, &data_dir(app, "mods")?, &settings.package_settings);
     let versions = versions::all(app, &settings.package_settings)?;
     let version = versions.iter().find(|v| settings.active_version.as_ref() == Some(&v.manifest.id));
-    let problems = check_all(&load_order(version, &mods, &settings.enabled_mods), settings.iso.as_ref().map(|d| d.game_id.as_str()), core_dir(app).as_deref());
+    let tools = debug_tools(&settings.package_settings);
+    let order = load_order(tools.as_ref(), version, &mods, &settings.enabled_mods);
+    let problems = check_all(&order, settings.iso.as_ref().map(|d| d.game_id.as_str()), core_dir(app).as_deref());
     Ok((mods, versions, problems))
+}
+
+/// The package's settings on its page, or its test tools (`debug`).
+fn setting_views(package: &Installed, debug: bool) -> Vec<SettingView> {
+    package
+        .manifest
+        .settings
+        .iter()
+        .filter(|s| s.debug == debug)
+        .map(|s| SettingView {
+            id: s.id.clone(),
+            kind: s.kind.clone(),
+            label: s.label.clone(),
+            description: s.description.clone(),
+            default: s.default,
+            value: package.values.get(&s.id).copied().unwrap_or(s.default),
+            choices: s.choices.clone(),
+            min: s.min,
+            max: s.max,
+            step: s.step,
+        })
+        .collect()
+}
+
+/// Saves the values of the package's settings on its page, or of its test tools (`debug`), and keeps
+/// the others'; none: those back to their defaults. They apply from the next launch.
+fn save_values(app: &AppHandle, package: &Installed, values: BTreeMap<String, i64>, debug: bool) -> Result<(), String> {
+    let settings = &package.manifest.settings;
+    for (key, value) in &values {
+        if !settings.iter().any(|s| &s.id == key && s.debug == debug && s.allows(*value)) {
+            return Err(tr!("La valeur {value} n’est pas permise pour « {setting} ».", value = value, setting = key));
+        }
+    }
+    let id = &package.manifest.id;
+    app.state::<Store>().update(app, |s| {
+        let mut kept = s.package_settings.remove(id).unwrap_or_default();
+        kept.retain(|key, _| settings.iter().any(|x| &x.id == key && x.debug != debug));
+        // (a preset's value comes from the others)
+        kept.extend(values.into_iter().filter(|(key, _)| settings.iter().any(|x| &x.id == key && !x.is_preset())));
+        if !kept.is_empty() {
+            s.package_settings.insert(id.clone(), kept);
+        }
+    })?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1458,22 +1535,7 @@ pub async fn package_detail(app: AppHandle, id: String) -> Result<Detail, String
         enabled: if kind == "mod" { settings.enabled_mods.contains(&id) } else { settings.active_version.as_ref() == Some(&id) },
         shipped: shipped.contains(&id),
         icon: package.icon(),
-        settings: m
-            .settings
-            .iter()
-            .map(|s| SettingView {
-                id: s.id.clone(),
-                kind: s.kind.clone(),
-                label: s.label.clone(),
-                description: s.description.clone(),
-                default: s.default,
-                value: package.values.get(&s.id).copied().unwrap_or(s.default),
-                choices: s.choices.clone(),
-                min: s.min,
-                max: s.max,
-                step: s.step,
-            })
-            .collect(),
+        settings: setting_views(package, false),
         changes: Changes { files: package.footprint.files.clone(), memory: package.footprint.memory.len(), partial: package.footprint.partial },
         requires: m.requires.clone(),
         conflicts: m.conflicts.clone(),
@@ -1481,28 +1543,60 @@ pub async fn package_detail(app: AppHandle, id: String) -> Result<Detail, String
     })
 }
 
-/// Saves the values of a package's settings; none: back to the defaults. They
-/// apply from the next launch.
+/// Saves the values of the settings on a package's page; none: back to the defaults.
 #[tauri::command]
 pub async fn package_settings_set(app: AppHandle, id: String, values: BTreeMap<String, i64>) -> Result<Detail, String> {
     let settings = app.state::<Store>().get(&app);
     let (mods, versions, _) = everything(&app, &settings)?;
     let package = mods.iter().chain(&versions).find(|m| m.manifest.id == id).ok_or_else(|| tr!("Ce mod n’est plus installé."))?;
-    for (key, value) in &values {
-        if !package.manifest.settings.iter().any(|s| &s.id == key && s.allows(*value)) {
-            return Err(tr!("La valeur {value} n’est pas permise pour « {setting} ».", value = value, setting = key));
-        }
-    }
-    // (a preset's value comes from the others)
-    let values: BTreeMap<String, i64> = values.into_iter().filter(|(key, _)| package.manifest.settings.iter().any(|s| &s.id == key && !s.is_preset())).collect();
-    app.state::<Store>().update(&app, |s| {
-        if values.is_empty() {
-            s.package_settings.remove(&id);
-        } else {
-            s.package_settings.insert(id.clone(), values);
-        }
-    })?;
+    save_values(&app, package, values, false)?;
     package_detail(app, id).await
+}
+
+/// The test tools of one package the game starts with.
+#[derive(Serialize)]
+pub struct DebugGroup {
+    id: String,
+    name: Text,
+    settings: Vec<SettingView>,
+}
+
+/// The Debug page: the launcher's test tools, then those of the version and of the enabled mods.
+#[derive(Serialize)]
+pub struct DebugState {
+    groups: Vec<DebugGroup>,
+    /// Those of the game as it would start now that are about these packages.
+    problems: Vec<Problem>,
+}
+
+#[tauri::command]
+pub async fn debug_state(app: AppHandle) -> Result<DebugState, String> {
+    if !DEV {
+        return Err(tr!("Les outils de test ne sont que dans le launcher en développement."));
+    }
+    let settings = app.state::<Store>().get(&app);
+    let (mods, versions, problems) = everything(&app, &settings)?;
+    let tools = debug_tools(&settings.package_settings);
+    let version = versions.iter().find(|v| settings.active_version.as_ref() == Some(&v.manifest.id));
+    let groups: Vec<DebugGroup> = tools
+        .iter()
+        .chain(load_order(None, version, &mods, &settings.enabled_mods))
+        .map(|p| DebugGroup { id: p.manifest.id.clone(), name: p.manifest.name.clone(), settings: setting_views(p, true) })
+        .filter(|g| !g.settings.is_empty())
+        .collect();
+    let problems = problems.into_iter().filter(|p| p.packages.iter().any(|id| groups.iter().any(|g| &g.id == id))).collect();
+    Ok(DebugState { groups, problems })
+}
+
+/// Saves the values of a package's test tools; none: back to their defaults.
+#[tauri::command]
+pub async fn debug_settings_set(app: AppHandle, id: String, values: BTreeMap<String, i64>) -> Result<DebugState, String> {
+    let settings = app.state::<Store>().get(&app);
+    let (mods, versions, _) = everything(&app, &settings)?;
+    let tools = debug_tools(&settings.package_settings);
+    let package = tools.iter().chain(&mods).chain(&versions).find(|m| m.manifest.id == id).ok_or_else(|| tr!("Ce mod n’est plus installé."))?;
+    save_values(&app, package, values, true)?;
+    debug_state(app).await
 }
 
 #[cfg(test)]
@@ -1705,6 +1799,30 @@ mod tests {
     }
 
     #[test]
+    fn the_test_tools_go_first_while_one_is_on() {
+        let saved = |json: &str| -> Values { serde_json::from_str(json).unwrap() };
+        let off = debug_tools(&Values::new()).expect("src-tauri/debug");
+        assert!(!off.debug_on());
+        assert_eq!((setting_views(&off, false).len(), setting_views(&off, true).len()), (0, 4));
+        let on = debug_tools(&saved(r#"{"partylauncher.debug":{"des":1,"mini-jeux":2}}"#)).unwrap();
+        assert!(on.debug_on());
+        assert!(code_mod(&on).writes.contains(&("mr001".into(), "gDebugDice".into(), 0, vec![0, 0, 0, 1])));
+        // before Winter Mode, linked with the launcher's core
+        let dir = scratch("tools");
+        let wpver = std::fs::read_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("versions")).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "wpver")).unwrap();
+        install(&versions::WPVER, &wpver, &dir.join("mods")).unwrap();
+        let winter = installed(&versions::WPVER, &dir.join("mods"), &Values::new()).pop().unwrap();
+        assert_eq!(load_order(Some(&off), Some(&winter), &[], &[]).len(), 1);
+        let order = load_order(Some(&on), Some(&winter), &[], &[]);
+        assert_eq!(order[0].manifest.id, DEBUG_TOOLS);
+        let code: Vec<link::CodeMod> = order.iter().map(|m| code_mod(m)).collect();
+        if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &code) {
+            panic!("{}", e.message);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn incompatible_mods_get_one_message() {
         let problem = |level, message: &str, packages: &[&str]| Problem { level, message: message.to_string(), packages: packages.iter().map(|p| p.to_string()).collect() };
         let kept = only_what_matters(vec![
@@ -1767,7 +1885,7 @@ mod tests {
         assert_eq!(patch["options"][0], json!({ "section-name": "S", "option-name": "O", "choice": 1 }));
         let b = mod_with(&dir, "b", "", "");
         let mods = [a, b];
-        let order = load_order(Some(&mods[1]), &mods, &["a".to_string()]);
+        let order = load_order(None, Some(&mods[1]), &mods, &["a".to_string()]);
         assert_eq!(order.iter().map(|m| m.manifest.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
         std::fs::remove_dir_all(dir).unwrap();
     }

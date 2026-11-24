@@ -345,6 +345,34 @@ enregistrés dans les paramètres du launcher et s'appliquent au lancement suiva
   réglage qu'il règle le fait donc passer à « Personnalisée ». Son `default` doit être le choix que
   donnent les valeurs par défaut.
 - La vérification de compatibilité tient compte des valeurs choisies : un réglage désactivé ne compte pas.
+- `"debug": true` : un outil de test. Il n'est pas sur la fiche du paquet mais sur la page **Debug** du
+  launcher en développement (ci-dessous), et vaut toujours son `default` dans un launcher de release.
+  Son `default` doit donc être « désactivé ». Le code du mod le lit comme n'importe quel réglage.
+
+### Page Debug (développement)
+
+`npm run tauri dev` (un build debug) ajoute une page **Debug** à la barre latérale. Elle réunit les
+outils de test du launcher, puis ceux (`"debug": true`) de la version active et des mods activés.
+
+Les outils du launcher sont un paquet à part, `partylauncher.debug` : le code est dans wp-core
+`mods/debug`, et le paquet est décompressé dans `src-tauri/debug/`. Il n'est utilisé qu'en
+développement, et seulement quand un de ses outils est activé. Il est alors chargé avant la version,
+pour que son tirage et ses mini-jeux sautés passent avant ceux du Mode Hiver. Sur le plateau :
+
+- **Sauter les mini-jeux** : tous, ceux de fin de manche, ou ceux des cases (duels, 1 contre 3). Le
+  résultat est écrit comme par le mini-jeu, au hasard ou avec le joueur 1 gagnant ou perdant.
+- **Choisir les dés à la croix** : pendant que les dés tournent au-dessus d'un joueur humain, ↑ / ↓
+  choisit le total, affiché en gros (↓ sous le minimum annule), puis A. Seulement pour le lancer de
+  déplacement, sans doublé.
+- **Mini-jeu imposé** : son numéro. Il est tiré quand il est du type demandé (4 joueurs, duel…) ;
+  sinon le tirage est normal et le journal de Dolphin dit `[debug] minigame N not in this draw`.
+
+Après un changement dans wp-core :
+
+```sh
+python3 tools/wpmod_build.py mods/debug    # dans wp-core (branche mod/core)
+rm -r src-tauri/debug && unzip -q <wp-core>/build/wpmods/Test-tools-*.wpmod -d src-tauri/debug
+```
 
 ### Vérification de compatibilité
 

@@ -132,6 +132,7 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("Le launcher est déjà à jour.", "The launcher is already up to date.", "El launcher ya está actualizado."),
     ("La mise à jour a échoué : {e}", "The update failed: {e}", "La actualización ha fallado: {e}"),
     ("Ce mod n’est plus installé.", "This mod isn’t installed anymore.", "Este mod ya no está instalado."),
+    ("Les outils de test ne sont que dans le launcher en développement.", "The test tools are only in the launcher in development.", "Las herramientas de prueba solo están en el launcher en desarrollo."),
     ("La valeur {value} n’est pas permise pour « {setting} ».", "The value {value} isn’t allowed for “{setting}”.", "El valor {value} no está permitido para «{setting}»."),
     ("Dans la Chaîne Mii", "In the Mii Channel", "En el Canal Mii"),
     ("Crée un Mii", "Making a Mii", "Creando un Mii"),
