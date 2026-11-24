@@ -69,6 +69,12 @@
    "doc": "pr\u00e9sentation de d\u00e9but de partie, avant le message de bienvenue"
   },
   {
+   "name": "Island_introStart",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but de la pr\u00e9sentation de d\u00e9but de partie, avant le survol de l'\u00eele"
+  },
+  {
    "name": "IslandMap_setEruptionVisuals",
    "kind": "bool",
    "exclusive": true,
@@ -327,6 +333,12 @@
    "doc": "joueur repouss\u00e9 par le souffle du dragon"
   },
   {
+   "name": "DragonWall_broken",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mur du dragon bris\u00e9"
+  },
+  {
    "name": "SpikeBall_swept",
    "kind": "void",
    "exclusive": false,
@@ -355,6 +367,12 @@
    "kind": "void",
    "exclusive": false,
    "doc": "colonne de la tornade apparue / disparue"
+  },
+  {
+   "name": "Tarzan_noVine",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "pas de liane ni de son arbre"
   },
   {
    "name": "Tarzan_created",
@@ -469,6 +487,12 @@
    "kind": "void",
    "exclusive": false,
    "doc": "d\u00e9s du lancer de d\u00e9placement"
+  },
+  {
+   "name": "Player_moveThirdDie",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "troisi\u00e8me d\u00e9 du lancer de d\u00e9placement"
   },
   {
    "name": "Player_moveRolled",
