@@ -28,6 +28,10 @@ const SETTINGS_OPTION: &str = "Settings";
 const FILES_OPTION: &str = "Files";
 /// link/mod.rs link_game's XML.
 const CODE_OPTION: &str = "Code";
+/// The launcher version the packages' "launcher" ranges are checked against, when Cargo.toml's is
+/// older: the first release that reads everything this build reads ("sound" patches: 0.4). Without
+/// use once Cargo.toml's version reaches it (then remove it).
+const READS_PACKAGES_OF: &str = "0.4.0";
 
 /// Saved values of the packages' settings: package id -> setting id -> value.
 pub type Values = BTreeMap<String, BTreeMap<String, i64>>;
@@ -91,7 +95,9 @@ pub struct Manifest {
 /// "riivolution": an XML of the package and the options it turns on. "delta": the
 /// package's files to make from the player's disc before a launch (rebuild.rs).
 /// "files": files of the package that replace (or add) disc files. "code": the mod's
-/// code, linked into the game with the other mods' at launch (link/, wp-core docs/modding.md).
+/// code, linked into the game with the other mods' at launch (link/, wp-core docs/modding.md). "sound":
+/// its patch (`patch`, sound/mod.rs) of a disc's sound archive (`archive`), applied at launch with the
+/// other mods' (link/).
 #[derive(Deserialize, Clone)]
 pub struct Patch {
     #[serde(rename = "type")]
@@ -105,6 +111,11 @@ pub struct Patch {
     /// "code": module ("main", "mr001"…) -> what the mod puts in it.
     #[serde(default)]
     modules: BTreeMap<String, link::CodeModule>,
+    /// "sound": the disc's archive ("/sound/wp_sound.brsar") and the package's patch.json.
+    #[serde(default)]
+    archive: String,
+    #[serde(default)]
+    patch: String,
 }
 
 /// A file of the package (`file`, which its Riivolution XML names) made from the
@@ -396,6 +407,8 @@ pub struct Footprint {
     sources: BTreeMap<String, PathBuf>,
     /// The disc files its code and texts change, which the launcher makes with the other mods' (link/).
     linked: Vec<String>,
+    /// What its sound patches change, by archive (lowercase disc path).
+    sounds: Vec<(String, crate::sound::Claims)>,
 }
 
 impl Footprint {
@@ -496,13 +509,19 @@ pub fn satisfies(version: &str, range: &str) -> bool {
     have >= want
 }
 
+/// The version a package's "launcher" range is checked against (READS_PACKAGES_OF).
+fn launcher_version() -> &'static str {
+    let own = env!("CARGO_PKG_VERSION");
+    if satisfies(own, &format!(">={READS_PACKAGES_OF}")) { own } else { READS_PACKAGES_OF }
+}
+
 fn validate(m: &Manifest) -> Result<(), String> {
     // (first: a newer package may have a format or patches this launcher doesn't know)
     if let Some(range) = &m.launcher {
         if !range_is_valid(range) {
             return Err(tr!("la plage de versions « {range} » n’est pas valide", range = range));
         }
-        if !satisfies(env!("CARGO_PKG_VERSION"), range) {
+        if !satisfies(launcher_version(), range) {
             return Err(tr!("il demande une version plus récente du launcher ({range}) : mets PartyLauncher à jour dans Paramètres › À propos", range = range));
         }
     }
@@ -526,7 +545,7 @@ fn validate(m: &Manifest) -> Result<(), String> {
     if let Some(id) = m.minigame_names.keys().find(|id| id.parse::<i32>().is_err()) {
         return Err(tr!("son mini-jeu « {id} » n’a pas un numéro valide", id = id));
     }
-    if let Some(patch) = m.patches.iter().find(|p| !["riivolution", "delta", "files", "code"].contains(&p.kind.as_str())) {
+    if let Some(patch) = m.patches.iter().find(|p| !["riivolution", "delta", "files", "code", "sound"].contains(&p.kind.as_str())) {
         return Err(tr!("ce launcher ne sait pas encore charger les patchs « {kind} »", kind = patch.kind));
     }
     let changes = m.patches.iter().any(|p| p.kind != "delta") || !m.messages.is_empty() || !m.minigames.is_empty();
@@ -544,6 +563,10 @@ fn validate(m: &Manifest) -> Result<(), String> {
         }
         if patch.kind == "code" && patch.modules.is_empty() {
             return Err(tr!("il ne contient aucun patch"));
+        }
+        let archive_ok = patch.archive.starts_with('/') && is_inside(&patch.archive) && patch.archive.to_ascii_lowercase().ends_with(".brsar");
+        if patch.kind == "sound" && (!archive_ok || patch.patch.trim_matches('/').is_empty() || !is_inside(&patch.patch)) {
+            return Err(tr!("son patch de son « {patch} » n’est pas valide", patch = patch.patch));
         }
     }
     for setting in &m.settings {
@@ -737,6 +760,10 @@ fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String,
         // (main.dol's code goes in memory: the linker tells the clashes)
         footprint.linked.extend(patch.modules.keys().filter(|m| *m != "main").map(|m| disc_path(&format!("/rel/{m}.rel.lz"))));
     }
+    for patch in manifest.patches.iter().filter(|p| p.kind == "sound") {
+        footprint.linked.push(disc_path(&patch.archive));
+        footprint.sounds.push((disc_path(&patch.archive), read_sound(package, &patch.patch)?));
+    }
     footprint.linked.extend(manifest.messages.keys().map(|l| disc_path(&link::messages_file(l))));
     footprint.linked.extend(manifest.messages_with.values().flat_map(|l| l.keys()).map(|l| disc_path(&link::messages_file(l))));
     if !manifest.minigames.is_empty() {
@@ -748,6 +775,19 @@ fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String,
     footprint.files.sort();
     footprint.files.dedup();
     Ok(footprint)
+}
+
+/// What a sound patch changes; the files it names are in the package.
+fn read_sound(package: &Path, patch: &str) -> Result<crate::sound::Claims, String> {
+    let text = std::fs::read_to_string(package.join(patch)).map_err(|_| tr!("{file} est introuvable dans le paquet", file = patch))?;
+    let claims = crate::sound::claims(&text).map_err(|e| tr!("{xml} est invalide : {e}", xml = patch, e = e))?;
+    for name in &claims.files {
+        let path = crate::sound::package_path(patch, name).filter(|p| is_inside(p)).ok_or_else(|| tr!("{xml} désigne un fichier hors du paquet", xml = patch))?;
+        if !package.join(&path).is_file() {
+            return Err(tr!("{file} est introuvable dans le paquet", file = path));
+        }
+    }
+    Ok(claims)
 }
 
 fn read_manifest(kind: &Kind, text: &str) -> Result<Manifest, String> {
@@ -991,6 +1031,30 @@ fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
             }
         }
     }
+    // sounds: the same name added by two mods can't be (the archive has one of each), the same sound
+    // changed by two mods: the last one wins (sound/mod.rs)
+    for (i, a) in mods.iter().enumerate() {
+        for b in &mods[i + 1..] {
+            let (mut added, mut edited) = (false, None);
+            for (archive, theirs) in &a.footprint.sounds {
+                for (_, ours) in b.footprint.sounds.iter().filter(|(other, _)| other == archive) {
+                    added |= theirs.names.iter().any(|n| ours.names.contains(n));
+                    edited = edited.or_else(|| theirs.edits.iter().find(|e| ours.edits.contains(e)).cloned());
+                }
+            }
+            let packages = vec![a.manifest.id.clone(), b.manifest.id.clone()];
+            if added {
+                problems.push(Problem { level: "error", message: incompatible(&a.manifest.name, &b.manifest.name), packages: packages.clone() });
+            }
+            if let Some(key) = edited {
+                problems.push(Problem {
+                    level: "warning",
+                    message: tr!("« {a} » et « {b} » changent le même son du jeu ({key}) : celui de « {b} » est gardé.", a = a.manifest.name, b = b.manifest.name, key = key),
+                    packages,
+                });
+            }
+        }
+    }
     for (i, a) in mods.iter().enumerate() {
         for b in &mods[i + 1..] {
             let shared: Vec<&String> = a.footprint.files.iter().filter(|f| b.footprint.files.binary_search(f).is_ok()).collect();
@@ -1033,7 +1097,17 @@ fn code_mod(m: &Installed) -> link::CodeMod<'_> {
             Some((slot.module.clone(), slot.name.clone(), slot.offset, bytes(slot.size, *m.values.get(&s.id)?)))
         })
         .collect();
-    link::CodeMod { id: &m.manifest.id, dir: &m.dir, modules, writes, messages: m.manifest.messages.clone(), messages_with: m.manifest.messages_with.clone(), minigames: m.manifest.minigames.clone() }
+    let sounds = m.manifest.patches.iter().filter(|p| p.kind == "sound").map(|p| link::SoundSpec { archive: p.archive.clone(), patch: p.patch.clone() }).collect();
+    link::CodeMod {
+        id: &m.manifest.id,
+        dir: &m.dir,
+        modules,
+        writes,
+        messages: m.manifest.messages.clone(),
+        messages_with: m.manifest.messages_with.clone(),
+        minigames: m.manifest.minigames.clone(),
+        sounds,
+    }
 }
 
 // src-tauri/core's files, built into the binary (build.rs).
@@ -1201,27 +1275,39 @@ fn linked_dir(dir: &Path) -> PathBuf {
     dir.join(".linked")
 }
 
-/// Before a launch (after boot_file): the mods' code linked with the core, and their texts applied to
-/// the disc's message files (taken from the player's disc the first time).
+/// Before a launch (after boot_file): the mods' code linked with the core, their texts applied to the
+/// disc's message files and their sound patches to the disc's sound archives (taken from the player's
+/// disc the first time).
 pub async fn link_code(app: &AppHandle, disc: &Disc, packages: &[&Installed]) -> Result<(), String> {
     let code: Vec<link::CodeMod> = packages.iter().map(|m| code_mod(m)).collect();
-    if code.iter().all(|c| c.modules.is_empty() && c.messages.is_empty()) {
+    if code.iter().all(|c| c.modules.is_empty() && c.messages.is_empty() && c.sounds.is_empty()) {
         return Ok(());
     }
     let core = core_dir(app).ok_or_else(|| tr!("Ce build du launcher n’a pas le cœur des mods : mets-le à jour."))?;
     let wanted: Vec<String> = code
         .iter()
         .flat_map(|c| c.messages.keys().chain(c.messages_with.values().flat_map(|l| l.keys())).map(|l| link::messages_file(l)))
+        .chain(code.iter().flat_map(|c| c.sounds.iter().map(|s| s.archive.clone())))
         .collect();
     let taken = crate::rebuild::disc_files(app, disc, &wanted).await?;
-    let read = |file: &str| std::fs::read(crate::rebuild::disc_file(&taken, file)).map_err(|_| tr!("Impossible de lire {file} sur ton ISO.", file = file));
+    // a sound archive that a package replaces whole (Winter Mode's, from its delta): the sound patches go
+    // on top of that file (the last such package's), and linked.xml's archive, last, replaces it
+    let read = |file: &str| match packages.iter().rev().find_map(|m| m.footprint.source(file)).filter(|_| file.to_ascii_lowercase().ends_with(".brsar")) {
+        Some(source) => std::fs::read(source).map_err(|_| tr!("Impossible de lire {file} dans les mods installés.", file = file)),
+        None => std::fs::read(crate::rebuild::disc_file(&taken, file)).map_err(|_| tr!("Impossible de lire {file} sur ton ISO.", file = file)),
+    };
     let out = linked_dir(&data_dir(app, "mods")?);
     let names: BTreeMap<&str, String> = packages.iter().map(|m| (m.manifest.id.as_str(), m.manifest.name.to_string())).collect();
-    link::link_game(&core, &read, &code, &out).map(|_| ()).map_err(|e| {
+    let linked = link::link_game(&core, &read, &code, &out).map_err(|e| {
         let who: Vec<String> = e.mods.iter().filter_map(|id| names.get(id.as_str())).map(|n| format!("« {n} »")).collect();
         let who = if who.is_empty() { String::new() } else { format!(" ({})", who.join(", ")) };
         tr!("Le code des mods ne s’assemble pas{who} : {why}", who = who, why = e.message)
-    })
+    })?;
+    // (check() already tells the player about the sounds two mods change, from the patches alone)
+    for w in linked.iter().flat_map(|l| &l.warnings) {
+        eprintln!("son : {w}");
+    }
+    Ok(())
 }
 
 fn files_file(dir: &Path, m: &Installed) -> PathBuf {
@@ -1736,6 +1822,45 @@ mod tests {
         package(&path, &[("mod.json", &json), ("code/x.o", "o"), ("lava.brres.lz", "l")]);
         install(&WPMOD, &path, &dir.join("mods"))?;
         Ok(installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap())
+    }
+
+    /// A mod with a sound patch (sound/mod.rs): `group` added, `volume` of a game sound edited.
+    fn sound_mod_with(dir: &Path, id: &str, group: &str, launcher: &str, file: &str) -> Result<Installed, String> {
+        let json = format!(
+            r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.0.0","games":["SUPP01"],"launcher":"{launcher}",
+            "patches":[{{"type":"sound","archive":"/sound/wp_sound.brsar","patch":"sound/wp_sound/patch.json"}}]}}"#
+        );
+        let patch = format!(
+            r#"{{"format":1,"sounds":{{"SEQ_SEBD001_03":{{"volume":90}}}},
+            "groups":[{{"label":"{group}","files":[{{"main":"{file}"}}],"sounds":[{{"label":"WSD_{group}","type":"wave","file":0,"player":"P"}}]}}]}}"#
+        );
+        let path = dir.join("in").join(format!("{id}.wpmod"));
+        package(&path, &[("mod.json", &json), ("sound/wp_sound/patch.json", &patch), ("sound/wp_sound/g.rwsd", "r")]);
+        install(&WPMOD, &path, &dir.join("mods"))?;
+        Ok(installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap())
+    }
+
+    #[test]
+    fn reads_sound_patches() {
+        let dir = scratch("sound");
+        // (packages with sounds ask for 0.4: this build reads them)
+        let a = sound_mod_with(&dir, "a", "GROUP_MOD_A", ">=0.4", "g.rwsd").unwrap();
+        assert_eq!(a.footprint.linked, ["/sound/wp_sound.brsar"]);
+        assert_eq!(code_mod(&a).sounds, [link::SoundSpec { archive: "/sound/wp_sound.brsar".into(), patch: "sound/wp_sound/patch.json".into() }]);
+        assert!(sound_mod_with(&dir, "later", "GROUP_MOD_L", ">=0.5", "g.rwsd").err().unwrap().contains("0.5"));
+        assert!(sound_mod_with(&dir, "missing", "GROUP_MOD_M", ">=0.4", "nope.rwsd").err().unwrap().contains("nope.rwsd"));
+        assert!(sound_mod_with(&dir, "escape", "GROUP_MOD_E", ">=0.4", "../../mod.json").err().unwrap().contains("hors du paquet"));
+        // the same game sound edited: a warning; the same group added: they can't run together
+        let b = sound_mod_with(&dir, "b", "GROUP_MOD_B", ">=0.4", "g.rwsd").unwrap();
+        let problems = check(&[&a, &b], None);
+        assert_eq!(levels(&problems), ["warning"], "{problems:?}");
+        assert!(problems[0].message.contains("SEQ_SEBD001_03.volume"));
+        let twin = sound_mod_with(&dir, "twin", "GROUP_MOD_A", ">=0.4", "g.rwsd").unwrap();
+        assert_eq!(levels(&only_what_matters(check(&[&a, &twin], None))), ["error"]);
+        // a mod that replaces the archive whole can't run with them
+        let whole = mod_with(&dir, "whole", "", r#"<file disc="/sound/wp_sound.brsar" external="a.bin"/>"#);
+        assert!(check(&[&a, &whole], None).iter().any(|p| p.level == "error"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

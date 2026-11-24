@@ -117,6 +117,7 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("identifiant en double", "duplicate id", "identificador repetido"),
     ("il demande une version plus récente du launcher ({range}) : mets PartyLauncher à jour dans Paramètres › À propos", "it needs a newer launcher ({range}): update PartyLauncher in Settings › About", "necesita una versión más reciente del launcher ({range}): actualiza PartyLauncher en Ajustes › Acerca de"),
     ("Impossible de lire {file} sur ton ISO.", "Couldn’t read {file} from your ISO.", "No se ha podido leer {file} en tu ISO."),
+    ("Impossible de lire {file} dans les mods installés.", "Couldn’t read {file} in the installed mods.", "No se ha podido leer {file} en los mods instalados."),
     ("« {name} » a besoin du fichier d’origine {file}, que ton ISO n’a pas : il lui faut le disque d’origine, sans mod.", "“{name}” needs the original {file}, which your ISO doesn’t have: it needs the original disc, without mods.", "«{name}» necesita el archivo original {file}, que tu ISO no tiene: necesita el disco original, sin mods."),
     ("« {name} » est abîmé ({file}) : réinstalle-le.", "“{name}” is damaged ({file}): install it again.", "«{name}» está dañado ({file}): vuelve a instalarlo."),
     ("son delta « {delta} » n’est pas valide", "its delta “{delta}” isn’t valid", "su delta «{delta}» no es válido"),
@@ -156,6 +157,8 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("Ce build du launcher n’a pas le cœur des mods : mets-le à jour.", "This build of the launcher doesn't have the mods' core: update it.", "Esta versión del launcher no tiene el núcleo de los mods: actualízala."),
     ("« {a} » et « {b} » sont incompatibles entre eux.", "“{a}” and “{b}” aren't compatible with each other.", "«{a}» y «{b}» son incompatibles entre sí."),
     ("Le code des mods ne s’assemble pas{who} : {why}", "The mods' code doesn't fit together{who}: {why}", "El código de los mods no encaja{who}: {why}"),
+    ("son patch de son « {patch} » n’est pas valide", "its sound patch “{patch}” isn't valid", "su parche de sonido «{patch}» no es válido"),
+    ("« {a} » et « {b} » changent le même son du jeu ({key}) : celui de « {b} » est gardé.", "“{a}” and “{b}” change the same game sound ({key}): the one from “{b}” is kept.", "«{a}» y «{b}» cambian el mismo sonido del juego ({key}): se queda el de «{b}»."),
 ];
 
 /// The French `fr` in the launcher's language.

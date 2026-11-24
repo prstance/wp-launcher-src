@@ -12,6 +12,7 @@ mod modes;
 mod mods;
 mod rebuild;
 mod settings;
+mod sound;
 mod tools;
 mod update;
 mod versions;

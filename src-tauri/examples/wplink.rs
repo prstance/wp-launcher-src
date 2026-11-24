@@ -2,14 +2,18 @@
 //!
 //!   cargo run --release --example wplink -- <core dir> <out dir> <unpacked mod dir>[,setting=value…] …
 //!
-//! The texts are applied to the disc's message files, read from $WP_DISC/files (an extracted disc).
+//! The texts are applied to the disc's message files, and the "sound" patches to the disc's sound
+//! archives, read from $WP_DISC/files (an extracted disc).
 //!
-//! Writes <out dir>/linked.xml (Riivolution: section "PartyLauncher", option "Code") and its files.
+//! Writes <out dir>/linked.xml (Riivolution: section "PartyLauncher", option "Code") and its files
+//! (rel/<module>.rel.lz, locale/<language>/mess.bin, sound/wp_sound.brsar…); prints the sound warnings.
 
 #[path = "../src/link/mod.rs"]
 mod link;
 #[path = "../src/lz.rs"]
 mod lz;
+#[path = "../src/sound/mod.rs"]
+mod sound;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -48,14 +52,20 @@ fn main() {
         let messages = serde_json::from_value(m.get("messages").cloned().unwrap_or_default()).unwrap_or_default();
         let messages_with = serde_json::from_value(m.get("messages_with").cloned().unwrap_or_default()).unwrap_or_default();
         let minigames = m.get("minigames").filter(|v| !v.is_null()).map(|v| serde_json::from_value(v.clone()).unwrap()).unwrap_or_default();
-        mods.push(link::CodeMod { id: m["id"].as_str().unwrap(), dir, modules, writes, messages, messages_with, minigames });
+        let sounds = m["patches"].as_array().unwrap().iter().filter(|p| p["type"] == "sound").map(|p| serde_json::from_value(p.clone()).unwrap()).collect();
+        mods.push(link::CodeMod { id: m["id"].as_str().unwrap(), dir, modules, writes, messages, messages_with, minigames, sounds });
     }
     let disc = |path: &str| {
         let root = std::env::var("WP_DISC").map_err(|_| "WP_DISC : le disque extrait".to_string())?;
         std::fs::read(PathBuf::from(root).join("files").join(path.trim_start_matches('/'))).map_err(|e| format!("{path} : {e}"))
     };
     match link::link_game(&core, &disc, &mods, &out) {
-        Ok(Some(l)) => println!("{} ({:?})", l.xml.display(), l.files),
+        Ok(Some(l)) => {
+            for w in &l.warnings {
+                eprintln!("son : {w}");
+            }
+            println!("{} ({:?})", l.xml.display(), l.files)
+        }
         Ok(None) => println!("aucun code"),
         Err(e) => {
             eprintln!("erreur : {} ({:?})", e.message, e.mods);

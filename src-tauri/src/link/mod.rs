@@ -59,6 +59,14 @@ pub struct InjectSpec {
     pub after: bool,
 }
 
+/// A "sound" patch (mod.json: patches[] of type "sound"): the disc's archive ("/sound/wp_sound.brsar")
+/// and the package's patch.json (sound/mod.rs).
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct SoundSpec {
+    pub archive: String,
+    pub patch: String,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct SaveSpec {
     pub symbol: String,
@@ -86,6 +94,8 @@ pub struct CodeMod<'a> {
     pub messages_with: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
     /// The minigames it adds (minigames.rs).
     pub minigames: Vec<minigames::Spec>,
+    /// Its patches of the disc's sound archives.
+    pub sounds: Vec<SoundSpec>,
 }
 
 impl CodeMod<'_> {
@@ -135,6 +145,8 @@ pub struct Linked {
     pub xml: PathBuf,
     /// The module files made (disc path), for the compatibility check.
     pub files: Vec<String>,
+    /// What the player should know: two mods changing the same sound (the later one wins).
+    pub warnings: Vec<String>,
 }
 
 /// The core's modules (.plf) the launcher can link into: those with a <module>.json.
@@ -161,13 +173,14 @@ fn hexs(b: &[u8]) -> String {
 
 /// Links the mods' code (in load order) with the core into `out`: the core's modules they change (REL,
 /// LZ-compressed as on the disc), main.dol's memory patches and the message files with the mods' texts
-/// (from the disc's: `disc` reads one), all in `out/linked.xml` (section "PartyLauncher", option "Code",
-/// choice 1). None if no mod has code or texts.
+/// (from the disc's: `disc` reads one) and the sound archives with the mods' sound patches (from the
+/// disc's too), all in `out/linked.xml` (section "PartyLauncher", option "Code", choice 1). None if no
+/// mod has code, texts or sounds.
 pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mods: &[CodeMod], out: &Path) -> Result<Option<Linked>, LinkError> {
-    if mods.iter().all(|m| !m.has_code() && m.messages.is_empty()) {
+    if mods.iter().all(|m| !m.has_code() && m.messages.is_empty() && m.sounds.is_empty()) {
         return Ok(None);
     }
-    let (lines, made) = build(core, Some(disc), mods)?;
+    let (lines, made, warnings) = build(core, Some(disc), mods)?;
     let io = |e: std::io::Error| LinkError::new(format!("{} : {e}", out.display()), &[]);
     let _ = std::fs::remove_dir_all(out);
     let mut files = Vec::new();
@@ -184,7 +197,7 @@ pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mo
     let path = out.join("linked.xml");
     std::fs::create_dir_all(out).map_err(io)?;
     std::fs::write(&path, xml).map_err(io)?;
-    Ok(Some(Linked { xml: path, files }))
+    Ok(Some(Linked { xml: path, files, warnings }))
 }
 
 /// Whether the mods' code links (the texts aside): what link_game would say, without writing anything.
@@ -195,8 +208,9 @@ pub fn check_code(core: &Path, mods: &[CodeMod]) -> Result<(), LinkError> {
     build(core, None, mods).map(|_| ())
 }
 
-/// The XML's patch lines and the files they name (disc path, contents). Without `disc`, no texts.
-type Built = (Vec<String>, Vec<(String, Vec<u8>)>);
+/// The XML's patch lines, the files they name (disc path, contents) and the warnings. Without `disc`, no
+/// texts and no sounds.
+type Built = (Vec<String>, Vec<(String, Vec<u8>)>, Vec<String>);
 
 fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mods: &[CodeMod]) -> Result<Built, LinkError> {
     let all: Vec<&str> = mods.iter().map(|m| m.id).collect();
@@ -375,7 +389,7 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
 
     // the texts: for one key, the last mod wins (mods.rs warns); those given for another mod of the
     // list win over all of them
-    let Some(disc) = disc else { return Ok((lines, made)) };
+    let Some(disc) = disc else { return Ok((lines, made, Vec::new())) };
     let with = texts_with(mods);
     let mut languages: BTreeMap<&str, Vec<&CodeMod>> = with.keys().map(|l| (*l, Vec::new())).collect();
     for m in mods {
@@ -401,7 +415,53 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         lines.push(format!(r#"<file disc="{name}" external="{}"/>"#, name.trim_start_matches('/')));
         made.push((name, file.bytes().to_vec()));
     }
-    Ok((lines, made))
+    let warnings = sounds(disc, mods, &mut lines, &mut made)?;
+    Ok((lines, made, warnings))
+}
+
+/// The sound archives the mods patch: each the disc's with their patches applied in load order
+/// (sound/mod.rs), last in the XML. The warnings: the same thing changed by two mods.
+fn sounds(disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mods: &[CodeMod], lines: &mut Vec<String>, made: &mut Vec<(String, Vec<u8>)>) -> Result<Vec<String>, LinkError> {
+    let mut archives: Vec<(&str, Vec<(&CodeMod, &SoundSpec)>)> = Vec::new();
+    for m in mods {
+        for s in &m.sounds {
+            match archives.iter_mut().find(|a| a.0 == s.archive) {
+                Some(a) => a.1.push((m, s)),
+                None => archives.push((&s.archive, vec![(m, s)])),
+            }
+        }
+    }
+    let mut warnings = Vec::new();
+    for (archive, patches) in archives {
+        let ids: Vec<&str> = patches.iter().map(|p| p.0.id).collect();
+        let bytes = disc(archive).map_err(|e| LinkError::new(e, &ids))?;
+        let texts = patches
+            .iter()
+            .map(|(m, s)| std::fs::read_to_string(m.dir.join(&s.patch)).map_err(|_| LinkError::new(format!("{} est introuvable", s.patch), &[m.id])))
+            .collect::<Result<Vec<String>, _>>()?;
+        let loaders: Vec<_> = patches
+            .iter()
+            .map(|(m, s)| {
+                move |name: &str| {
+                    let path = crate::sound::package_path(&s.patch, name).ok_or_else(|| format!("{name} : hors du paquet"))?;
+                    std::fs::read(m.dir.join(&path)).map_err(|_| format!("{path} est introuvable"))
+                }
+            })
+            .collect();
+        let list: Vec<crate::sound::SoundPatch> = patches.iter().zip(&texts).zip(&loaders).map(|(((m, _), json), file)| crate::sound::SoundPatch { id: m.id, json, file }).collect();
+        let (bytes, w) = crate::sound::merge(bytes, &list).map_err(|e| {
+            let message = format!("{archive} : {}", e.message);
+            match &e.id {
+                Some(id) => LinkError::new(message, &[id.as_str()]),
+                None => LinkError::new(message, &ids),
+            }
+        })?;
+        crate::sound::check_archive(archive, &bytes).map_err(|e| LinkError::new(e, &ids))?;
+        lines.push(format!(r#"<file disc="{archive}" external="{}"/>"#, archive.trim_start_matches('/')));
+        made.push((archive.to_string(), bytes));
+        warnings.extend(w);
+    }
+    Ok(warnings)
 }
 
 #[cfg(test)]
@@ -424,6 +484,7 @@ mod tests {
             messages: BTreeMap::new(),
             messages_with: BTreeMap::from([(with.to_string(), BTreeMap::from([("fr_EU".to_string(), BTreeMap::from([("k".to_string(), "t".to_string())]))]))]),
             minigames: Vec::new(),
+            sounds: Vec::new(),
         };
         assert!(texts_with(&[code("a", "b")]).is_empty());
         let both = [code("a", "b"), code("b", "c")];
