@@ -186,7 +186,11 @@ impl Linker {
             for r in &section.relocs {
                 let t = &self.out.symbols[r.symbol];
                 let place = t.value as i64 + r.addend as i64;
-                if r.symbol != index && t.is_defined() && t.section as usize == bss && (from as i64..(from + size) as i64).contains(&place) {
+                // Read through another symbol: inside it by the addend, or from an anchor of no size
+                // before it (mwcc's "...bss.0" + the displacement in the instruction, not seen here)
+                let inside = (from as i64..(from + size) as i64).contains(&place);
+                let anchor = t.size == 0 && place <= from as i64;
+                if r.symbol != index && t.is_defined() && t.section as usize == bss && (inside || anchor) {
                     return Err(refuse());
                 }
             }
@@ -387,6 +391,18 @@ mod tests {
         assert!(out.sections[text].relocs.iter().any(|r| r.symbol == out.global("gZero").unwrap()));
         // a variable also read through its section stays where it is: refused
         let e = link(&empty_module(), &[], &[part("gAlso")], &main).err().unwrap();
+        assert!(e.message.contains("valeur non nulle"), "{}", e.message);
+    }
+
+    /// mwcc reaches a file's statics from the section's start ("...bss.0" + 0) and puts their offset in
+    /// the load instruction: a variable after such an anchor is refused, it would be read in .bss.
+    #[test]
+    fn refuses_a_bss_variable_behind_an_anchor() {
+        let main = MainSymbols::default();
+        let mut obj = with_bss();
+        obj.sections[1].relocs[1].addend = 0;
+        let part = ModPart { id: "m".into(), objects: vec![obj], writes: vec![("gAlso".into(), 0, vec![0, 0, 0, 14])], ..Default::default() };
+        let e = link(&empty_module(), &[], &[part], &main).err().unwrap();
         assert!(e.message.contains("valeur non nulle"), "{}", e.message);
     }
 }
