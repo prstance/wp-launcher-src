@@ -1,11 +1,11 @@
 //! The mods' resident code (mod.json: a code patch's module "resident"): one module, /wp/wpmods.rel, with
 //! every mod's resident objects, that the core loads once at the start and never unloads (wp-srccore
-//! src/wp/core/ModCode.cpp: at the end of GameData::initialize, into MEM2, OSLink against main.dol, then
+//! src/wp/core/ModCode.cpp: at the end of GameData::initialize, into MEM1 (code in MEM2 does not run), OSLink against main.dol, then
 //! its prolog). Its prolog is made here: it runs the mods' constructors and their own prologs, then adds
 //! each handler to main.dol's list of its hook (wpAddHandler, in load order), so that every module
 //! calling the hook (main.dol, the modes, the minigames) calls it.
 //!
-//! The module is in MEM2 and main.dol in MEM1, too far apart for a `bl`: each branch to main.dol goes
+//! Where the module lands is not known here (a heap block): each branch to main.dol goes
 //! through a veneer of the module (lis/addi r12, mtctr, bctr). A module the launcher links the mods into
 //! (mr001, inst, menu) has its own list of a hook a mod names in its part: when resident handlers are on
 //! that hook too, the module's list gets a chain (chain()) that calls main.dol's list in their place.
@@ -227,7 +227,7 @@ pub fn link(parts: &[ModPart], hooks: &[HookDef], main: &MainSymbols) -> Result<
 }
 
 /// Each branch to main.dol (an undefined symbol: OSLink resolves it) goes through a veneer at the end of
-/// .text, one per target: `bl` reaches ±32 MB, and the module is in MEM2.
+/// .text, one per target: `bl` reaches ±32 MB, and the module's place is the heap's choice.
 fn veneers(out: &mut Object) -> Result<(), String> {
     let text = section(out, ".text");
     let mut made: HashMap<(String, i32), usize> = HashMap::new();
