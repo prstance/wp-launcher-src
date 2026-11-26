@@ -11,6 +11,7 @@ mod mii;
 mod modes;
 mod mods;
 mod overlay;
+mod ranges;
 mod rebuild;
 mod settings;
 mod sound;

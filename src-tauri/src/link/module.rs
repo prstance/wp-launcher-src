@@ -30,7 +30,7 @@ pub struct ModPart {
     pub hooks: Vec<(String, String)>,
     /// (function of the core, replacement symbol).
     pub replaces: Vec<(String, String)>,
-    /// (symbol, offset, bytes): values written into the mod's data (settings, save layout).
+    /// (symbol, offset, bytes): values written into the mod's data (its settings).
     pub writes: Vec<(String, u32, Vec<u8>)>,
 }
 

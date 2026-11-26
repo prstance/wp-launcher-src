@@ -26,8 +26,8 @@ def patches_of(root):
 
 HERE = Path(__file__).resolve().parent
 TAURI = HERE.parent / "src-tauri"
-# The launcher version that knows the "delta" patches.
-DELTA_LAUNCHER = ">=0.2"
+# The launchers that read the package (src-tauri/src/ranges.rs READS_PACKAGES_OF): every package says it.
+LAUNCHER = ">=0.6.0"
 
 
 def dolphin_tool():
@@ -135,6 +135,7 @@ def main():
             "authors": args.author,
             "description": args.description,
             "games": args.game,
+            "launcher": LAUNCHER,
             "requires": dict(r.split("=", 1) for r in args.requires),
             "conflicts": dict(c.split("=", 1) for c in args.conflicts),
             "patches": patches_of(root),
@@ -155,7 +156,6 @@ def main():
             delta, dropped = make_deltas(root, args.disc, work)
             if delta:
                 manifest["patches"].append(delta)
-                manifest["launcher"] = DELTA_LAUNCHER
         args.out.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("version.json" if is_version else "mod.json", json.dumps(manifest, ensure_ascii=False, indent=2))

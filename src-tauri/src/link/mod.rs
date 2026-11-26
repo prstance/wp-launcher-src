@@ -48,10 +48,9 @@ pub struct CodeModule {
     /// Core modules: function of the game -> replacement.
     #[serde(default)]
     pub replace: BTreeMap<String, String>,
-    /// Core modules: bytes of the board's save (IslandSaveData's padding) the mod keeps there. The launcher
-    /// writes where they start (u32, from gWpSave) into `symbol`.
+    /// No longer a field (the board's save is the core's, wpBoardSave in main.dol): read only to refuse it.
     #[serde(default)]
-    pub save: Option<SaveSpec>,
+    pub save: Option<serde::de::IgnoredAny>,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -71,12 +70,6 @@ pub struct InjectSpec {
 pub struct SoundSpec {
     pub archive: String,
     pub patch: String,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-pub struct SaveSpec {
-    pub symbol: String,
-    pub size: u32,
 }
 
 fn hex(text: &str) -> Option<u32> {
@@ -140,14 +133,6 @@ struct ModuleInfo {
     params: rel::RelParams,
     #[serde(default)]
     hooks: Vec<module::HookDef>,
-    /// Bytes of the board's save the mods share; left out: the size of the module's gWpSave (none: 0).
-    #[serde(default)]
-    save_bytes: Option<u32>,
-}
-
-/// The bytes of the board's save the mods share in `plf`.
-fn save_bytes(info: &ModuleInfo, plf: &elf::Object) -> u32 {
-    info.save_bytes.unwrap_or_else(|| plf.global("gWpSave").map_or(0, |s| plf.symbols[s].size))
 }
 
 /// The files and memory patches that put the mods' code into the game, as a Riivolution XML.
@@ -233,7 +218,7 @@ type Built = (Vec<String>, Vec<(String, Vec<u8>)>, Vec<String>);
 
 /// main.json of the core: every hook, with its list in main.dol.
 fn main_hooks(core: &Path) -> Result<Vec<module::HookDef>, LinkError> {
-    let text = std::fs::read_to_string(core.join("main.json")).map_err(|_| LinkError::new("ce cœur des mods n'a pas main.json (les hooks de main.dol) : launcher à mettre à jour".into(), &[]))?;
+    let text = std::fs::read_to_string(core.join("main.json")).map_err(|_| LinkError::new("cœur des mods : main.json (les hooks de main.dol) est introuvable".into(), &[]))?;
     serde_json::from_str::<resident::MainInfo>(&text).map(|i| i.hooks).map_err(|e| LinkError::new(format!("main.json : {e}"), &[]))
 }
 
@@ -243,6 +228,13 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
     let mut main = rel::MainSymbols::parse(&std::fs::read_to_string(core.join("main.sym")).map_err(io)?).map_err(|e| LinkError::new(e, &[]))?;
     let mut lines = Vec::new();
     let mut made = Vec::new();
+
+    // the board's save left the manifest (the core's wpBoardSave): a package from before it
+    for m in mods {
+        if let Some(module) = m.modules.iter().find(|(_, part)| part.save.is_some()).map(|(name, _)| name) {
+            return Err(LinkError::new(format!("le module « {module} » a « save », qui n'existe plus : la sauvegarde du plateau passe par wpBoardSave du cœur"), &[m.id]));
+        }
+    }
 
     // the mods' minigames: the core reads them from /wp/minigames.bin
     let added: minigames::Added = mods.iter().filter(|m| !m.minigames.is_empty()).map(|m| (m.id, &m.minigames[..])).collect();
@@ -264,8 +256,8 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
         if !part.hooks.is_empty() {
             return Err(fail(format!("les « hooks » du code de main.dol vont dans le module « {} » (chargé en {}), pas dans « main »", resident::MODULE, resident::FILE)));
         }
-        if !part.replace.is_empty() || part.save.is_some() {
-            return Err(fail("« replace » et « save » ne sont permis que dans un module du cœur (mr001, inst, menu), pas dans « main »".into()));
+        if !part.replace.is_empty() {
+            return Err(fail("« replace » n'est permis que dans un module du cœur (mr001, inst, menu), pas dans « main »".into()));
         }
         let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
         let mut injects = Vec::new();
@@ -300,9 +292,6 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
             let fail = |msg: String| LinkError::new(msg, &[m.id]);
             if !part.inject.is_empty() {
                 return Err(fail(format!("les injections (« inject ») vont dans le module « main », pas dans « {} »", resident::MODULE)));
-            }
-            if part.save.is_some() {
-                return Err(fail(format!("« save » n'est permis que dans mr001, pas dans « {} »", resident::MODULE)));
             }
             let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
             let writes = m.writes.iter().filter(|w| w.0 == resident::MODULE).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
@@ -339,25 +328,11 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
         let plf = elf::Object::parse(&std::fs::read(core.join(format!("{module}.plf"))).map_err(io)?).map_err(|e| LinkError::new(format!("{module}.plf : {e}"), &[]))?;
         let info: ModuleInfo = serde_json::from_str(&std::fs::read_to_string(core.join(format!("{module}.json"))).map_err(io)?)
             .map_err(|e| LinkError::new(format!("{module}.json : {e}"), &[]))?;
-        let room = save_bytes(&info, &plf);
         let mut parts = Vec::new();
-        let mut save_at = 0u32;
-        let mut layout = 0x811C_9DC5u32; // FNV-1a of the mods' save layout: a save of another layout is ignored
         for m in &users {
             let part = &m.modules[&module];
             let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
-            let mut writes: Vec<(String, u32, Vec<u8>)> = m.writes.iter().filter(|w| w.0 == module).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
-            if let Some(save) = &part.save {
-                if save_at + save.size > room {
-                    let ids: Vec<&str> = users.iter().filter(|u| u.modules[&module].save.is_some()).map(|u| u.id).collect();
-                    return Err(LinkError::new(format!("plus assez de place dans la sauvegarde du plateau ({room} octets en tout)"), &ids));
-                }
-                writes.push((save.symbol.clone(), 0, save_at.to_be_bytes().to_vec()));
-                for b in m.id.bytes().chain(save_at.to_be_bytes()).chain(save.size.to_be_bytes()) {
-                    layout = (layout ^ b as u32).wrapping_mul(0x0100_0193);
-                }
-                save_at += save.size;
-            }
+            let writes = m.writes.iter().filter(|w| w.0 == module).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
             parts.push(module::ModPart {
                 id: m.id.to_string(),
                 objects,
@@ -382,9 +357,6 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
             let position = order.iter().position(|o| *o > index).unwrap_or(order.len());
             order.insert(position, index);
             parts.insert(position, module::ModPart { id: first.clone(), objects: vec![object], hooks: vec![(hook.clone(), resident::chain_symbol(hook))], ..Default::default() });
-        }
-        if room > 0 && plf.global("gWpSaveLayout").is_some() {
-            parts.push(module::ModPart { id: "cœur".into(), writes: vec![("gWpSaveLayout".into(), 0, layout.to_be_bytes().to_vec())], ..Default::default() });
         }
         let linked = module::link(&plf, &info.hooks, &parts, &main)?;
         let bytes = rel::write(&linked, &info.params, &main).map_err(|e| LinkError::new(format!("{module} : {e}"), &all))?;
@@ -416,8 +388,8 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, do
             return Err(fail(format!("nom de module « {name} » invalide")));
         }
         let part = &m.modules[*name];
-        if !part.hooks.is_empty() || !part.replace.is_empty() || part.save.is_some() {
-            return Err(fail(format!("« {name} » n'est pas un module du cœur : pas de hooks, replace ni save")));
+        if !part.hooks.is_empty() || !part.replace.is_empty() {
+            return Err(fail(format!("« {name} » n'est pas un module du cœur : ni hooks ni replace")));
         }
         let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
         let writes = m.writes.iter().filter(|w| &w.0 == *name).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
@@ -617,6 +589,17 @@ mod tests {
         if !core.join("main.json").exists() {
             let e = check_code(&core, &[code("a", dir, "resident", r#"{"objects": [], "hooks": {"Scene_loaded": "A"}}"#)]).err().unwrap();
             assert!(e.message.contains("main.json"), "{}", e.message);
+        }
+    }
+
+    /// The board's save is the core's (wpBoardSave): `save` in a module is refused, wherever it is.
+    #[test]
+    fn save_is_no_longer_a_field() {
+        let core = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core");
+        let dir = Path::new("/nowhere");
+        for module in ["mr001", "main", "resident", "mg444"] {
+            let e = check_code(&core, &[code("a", dir, module, r#"{"objects": [], "save": {"symbol": "gAt", "size": 2}}"#)]).err().unwrap();
+            assert!(e.message.contains("« save »") && e.message.contains("wpBoardSave") && e.mods == ["a"], "{module} : {}", e.message);
         }
     }
 

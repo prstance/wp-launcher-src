@@ -10,7 +10,8 @@
 //! (main.dol and rel/<name>.rel.lz of the core, rel/<module>.rel.lz linked, wp/wpmods.rel, wp/minigames.bin,
 //! locale/<language>/mess.bin, sound/wp_sound.brsar…); prints the sound warnings. A core file that a mod
 //! replaces whole (its "files" patches, the <file disc=…> of its Riivolution XMLs) is left to it, as the
-//! launcher does.
+//! launcher does. A package this launcher would not read (its "launcher" range, src/ranges.rs) is refused
+//! the same way.
 
 #[path = "../src/delta.rs"]
 mod delta;
@@ -18,6 +19,8 @@ mod delta;
 mod link;
 #[path = "../src/lz.rs"]
 mod lz;
+#[path = "../src/ranges.rs"]
+mod ranges;
 #[path = "../src/sound/mod.rs"]
 mod sound;
 
@@ -65,6 +68,17 @@ fn main() {
             (k.to_string(), v.to_string())
         }).collect();
         let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("mod.json")).or_else(|_| std::fs::read_to_string(dir.join("version.json"))).unwrap()).unwrap();
+        // (the launcher's words: mods.rs check_launcher)
+        let range = m.get("launcher").and_then(|r| r.as_str());
+        let why = match ranges::launcher(range) {
+            ranges::Launcher::Reads => None,
+            ranges::Launcher::Old => Some("il a été fait pour un ancien cœur des mods : il faut mettre le mod à jour".to_string()),
+            ranges::Launcher::Newer => Some(format!("il demande une version plus récente du launcher ({})", range.unwrap_or_default())),
+            ranges::Launcher::Invalid => Some(format!("la plage de versions « {} » n’est pas valide", range.unwrap_or_default())),
+        };
+        if let Some(why) = why {
+            fail(&format!("{} : {why}", m["id"].as_str().unwrap_or("?")));
+        }
         dirs.push((dir, values));
         manifests.push(m);
     }

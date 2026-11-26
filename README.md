@@ -256,7 +256,7 @@ La version active les change de deux façons :
   siens, et une vignette changée passe devant sa capture ;
 - avec `modes` dans son thème (voir Versions), pour des images faites pour le launcher, montrées en
   premier (ou seules, avec `modesOnly`). Mode Hiver ne montre que dix plans de ses parties
-  (`themes/mode-hiver/mode-*.png`) : Île hivernale, 9 nouveaux mini-jeux, cases avalanche, grotte de glace, yéti, boule de neige géante, mur de glace, dé de
+  (wp-core `mods/winter/files/theme/mode-*.png`) : Île hivernale, 9 nouveaux mini-jeux, cases avalanche, grotte de glace, yéti, boule de neige géante, mur de glace, dé de
   glace, la glace craque, Sanctuaire du glacier.
 
 ## Mods
@@ -276,6 +276,7 @@ Un `.wpmod` est un zip avec un `mod.json` à la racine :
   "authors": ["auteur"],
   "description": "…",
   "games": ["SUPP01"],
+  "launcher": ">=0.6.0",
   "requires": { "auteur.base": ">=1.0" },
   "conflicts": { "autre.mod": "*" },
   "patches": [
@@ -288,17 +289,22 @@ Un `.wpmod` est un zip avec un `mod.json` à la racine :
 }
 ```
 
-- Seuls `format`, `id`, `name`, `version`, `games` et `patches` sont obligatoires. Une plage de versions
-  vaut `*` ou `>=x.y`.
-- `"launcher": ">=0.2"` : les versions du launcher qu'il lui faut. Un launcher plus ancien le refuse en
-  demandant d'être mis à jour (Paramètres › À propos), avant même de regarder son format ou ses patchs :
-  c'est ce qui permet d'ajouter des types de patch sans casser les anciens launchers.
-- Types de patch : `riivolution`, `delta` (ci-dessous), `files` et `code` (voir « Mods compatibles »). Un mod Gecko est refusé.
+- Seuls `format`, `id`, `name`, `version`, `games`, `launcher` et `patches` sont obligatoires. Une plage de
+  versions vaut `*` ou `>=x.y`.
+- `"launcher": ">=0.6.0"` : les versions du launcher qu'il lui faut, lues avant tout le reste
+  (`src-tauri/src/ranges.rs`). Un launcher plus ancien que la plage le refuse en demandant d'être mis à jour
+  (Paramètres › À propos) : c'est ce qui permet d'ajouter des types de patch sans casser les anciens launchers.
+  Il n'y a pas de compatibilité avec les paquets d'avant le cœur v2 et son API : un paquet qui demande moins que
+  `>=0.6.0` (`READS_PACKAGES_OF`), `*` ou rien est refusé (« il a été fait pour un ancien cœur des mods : il faut
+  mettre le mod à jour »). Un tel paquet déjà installé reste dans la Bibliothèque, et le jeu ne se lance pas avec
+  lui, avec le même message.
+- Types de patch : `riivolution`, `delta` (ci-dessous), `files`, `code` et `sound` (voir « Mods compatibles »). Un mod Gecko est refusé.
 - `minigame_names` (facultatif) : le nom des mini-jeux qu'il ajoute ou remplace, par numéro, pour la présence Discord :
   `{ "444": { "fr": "Boule de neige", "en": "Snowball Toss" } }`. À ne pas confondre avec `minigames`, le registre des mini-jeux.
 - `options` dit quelles options du XML activer (`choice` compte à partir de 1). La racine Riivolution
   est celle du paquet.
-- `scripts/make-wpmod.py` fabrique un `.wpmod` à partir d'un paquet Riivolution.
+- `scripts/make-wpmod.py` fabrique un `.wpmod` à partir d'un paquet Riivolution (`"launcher": ">=0.6.0"`), comme
+  `scripts/riivo2wpmod.py`, qui pose les questions.
 - `scripts/riivolution-from-disc.py` fabrique ce paquet à partir d'une copie modifiée du disque extrait.
   Un `main.dol` modifié y entre en `<file disc="main.dol">` : Dolphin le comprend, pas une vraie Wii.
 
@@ -333,7 +339,7 @@ Un patch `code` donne ses objets par module (`"modules": { "<module>": { "object
 |---|---|---|
 | `main` | `objects`, `inject` | relié à une adresse fixe de la mémoire basse libre (0x80001800–0x80003000), atteint par les injections ; patchs mémoire sur le main.dol du cœur (`link/dol.rs`) |
 | `resident` | `objects`, `hooks` (ceux de `main.json`) | relié avec ceux des autres mods dans `/wp/wpmods.rel` (`link/resident.rs`), que le cœur charge au démarrage |
-| `mr001`, `inst`, `menu` | `objects`, `hooks`, `replace`, `save` (mr001) | ajouté au `.plf` du cœur, puis le REL (`link/module.rs`) |
+| `mr001`, `inst`, `menu` | `objects`, `hooks`, `replace` | ajouté au `.plf` du cœur, puis le REL (`link/module.rs`) |
 | un autre nom (`mg444`) | `objects` | un nouveau REL, `/rel/<nom>.rel.lz` |
 
 - **Injections** : le launcher fait le main.dol du cœur, il y lit l'instruction à `at` + `offset` ; si ce n'est pas
@@ -351,14 +357,18 @@ Un patch `code` donne ses objets par module (`"modules": { "<module>": { "object
   mod, un hook exclusif n'a qu'un mod, 8 gestionnaires résidents au plus par liste (ceux qu'un module ajoute lui-même
   avec `WP_ADD` ne peuvent pas se compter). MEM2 est trop loin de main.dol pour un `bl` : chaque appel vers main.dol
   passe par un relais du module (`lis`/`addi r12`, `mtctr`, `bctr`). Le code résident peut utiliser le code `main`
-  du mod (ses symboles), pas l'inverse ; `inject`, `replace` et `save` n'y sont pas permis, et les `hooks` d'un
+  du mod (ses symboles), pas l'inverse ; `inject` et `replace` n'y sont pas permis, et les `hooks` d'un
   module `main` sont refusés : ils vont dans `resident`.
 - **Un hook dans un module et en résident** : un module du cœur (mr001…) a sa propre liste d'un hook dès qu'un mod
   le nomme dans sa partie, et ne lit plus celle de main.dol. Quand des gestionnaires résidents sont aussi sur ce
   hook, le launcher met dans la liste du module un relais (`wp_chain_<hook>`) qui appelle la liste de main.dol avec
   les mêmes arguments (r3–r10, f1–f8 ; un hook `bool` s'arrête au premier `true`), à la place du premier mod résident
   dans l'ordre de chargement.
-- `main.json` (`tools/core/export.py`) : les hooks de main.dol. Un cœur sans ce fichier refuse le code résident.
+- `main.json` (`tools/core/export.py`) : les hooks de main.dol, une partie du cœur comme `core.json`.
+- **Sauvegarde** : le manifeste n'en a plus. Le plateau garde l'état des mods dans la sauvegarde du cœur
+  (`wpBoardSave`, dans main.dol), les autres données dans ses blocs nommés (`wpSaveBlock`) : le launcher n'y
+  réserve plus rien. Un module qui a encore `save` est refusé (« son module « mr001 » a « save », qui n'existe
+  plus »), à l'installation comme au moment de relier.
 
 Les mini-jeux des mods (`minigames`) vont dans `/wp/minigames.bin` (`link/minigames.rs`, créé par `linked.xml`), que
 `GameData` du cœur lit au démarrage : plus de table de main.dol à déplacer, plus de limite. Un mini-jeu a soit
@@ -366,9 +376,8 @@ Les mini-jeux des mods (`minigames`) vont dans `/wp/minigames.bin` (`link/miniga
 numéro, ou le `label` d'un groupe qu'un patch `sound` ajoute, cherché une fois les patchs de sons appliqués), qui passe
 devant ; `pair` (facultatif) est le mini-jeu joué avec lui (`mPair`, un duel jumeau), du jeu ou d'un mod. 103 et 417
 sont refusés sauf avec `"replace_disc_rel": true` : le disque a `/rel/mg103.rel` et `/rel/mg417.rel` (sans entrée
-dans la table), que le REL du mod remplacerait. Un mod fait pour l'ancien
-cœur (patch `code` et `"launcher"` en dessous de `>=0.5`) est refusé : il faut sa nouvelle version. Un paquet ne se lie
-qu'à un cœur qui a ses hooks et ses symboles : changer de cœur demande de refaire les paquets.
+dans la table), que le REL du mod remplacerait. Un paquet ne se lie qu'à un cœur qui a ses hooks et ses symboles :
+changer de cœur demande de refaire les paquets (et de monter `READS_PACKAGES_OF` quand son API change).
 
 ### Deltas : pas de fichier du jeu dans le paquet
 
@@ -391,8 +400,8 @@ premier lancement (`src-tauri/src/rebuild.rs`, phase « preparing » de l'écran
   clair. Les fichiers faits restent dans le dossier du paquet ; une mise à jour du paquet les refait.
 - `scripts/make-wpmod.py … --disc <image du disque d'origine>` fait les deltas tout seul : chaque fichier
   du paquet qui remplace un fichier du disque devient un delta (`src-tauri/examples/wpdelta.rs`, vérifié
-  en le réappliquant), et le paquet demande `"launcher": ">=0.2"`. Mode Hiver : 135 Mo → 38 Mo, sans plus
-  aucun fichier du jeu ; 183 fichiers refaits en ~9 s.
+  en le réappliquant). Mode Hiver (de wp-winter) : 135 Mo → 38 Mo, sans plus aucun fichier du jeu ; 183
+  fichiers refaits en ~9 s.
 - Test réel : `WP_TEST_PACKAGE=… WP_TEST_ISO=… WP_TEST_FILES=<fichiers d'origine du paquet> cargo test
   --release makes_a_package_again -- --ignored`.
 
@@ -449,15 +458,15 @@ enregistrés dans les paramètres du launcher et s'appliquent au lancement suiva
   choix `on` (1 par défaut). L'option ne doit pas être aussi dans les `options` fixes du patch.
 - `memory` : la valeur est écrite en big-endian sur `size` octets (1, 2 ou 4) à `offset`, avant le
   démarrage du jeu. C'est au code du mod (dans son `main.dol`) de la lire. Le launcher l'écrit par un XML
-  Riivolution qu'il génère (`mods/.settings-<id>.xml`).
+  Riivolution qu'il génère (`mods/.settings-<id>.xml`). Réservé aux mods sans patch `code` : la mémoire basse
+  (0x80001800–0x80003000) reçoit le code `main` des mods, et un mod qui a du code prend `symbol`.
 - `symbol` (`{"module", "name", "size", "offset"}`) : la valeur est écrite dans la variable `name` du code du paquet
   dans `module` (`main`, `resident`, `mr001`, un nouveau REL…), au moment de relier. Une variable laissée à 0 (en
   `.bss`) est déplacée en `.data` pour y écrire la valeur ; seule une variable lue autrement que par son nom (par sa
   section, comme une `static` voisine) est refusée, avec le conseil de l'initialiser à une valeur non nulle.
 - `"float": true` dans `symbol` (4 octets, un `choice` ou un `number`) : `default`, `min`, `max`, `step`, les `value`
   des `choices` et les valeurs des `sets` qui le règlent sont des décimaux ; la fiche les montre ainsi, le launcher
-  garde et écrit les bits du `f32`. Sans `float`, un décimal est refusé. Un paquet du `wpmod_build.py` d'avant (qui
-  retirait `float` et convertissait `default` et les `value`) donne des entiers : il marche comme avant.
+  garde et écrit les bits du `f32`. Sans `float`, un décimal est refusé.
 - Une valeur enregistrée que le paquet ne permet plus (après une mise à jour) revient à `default`.
 - Un préréglage est un `choice` dont les choix règlent d'autres réglages d'un coup, sans option
   Riivolution ni `memory` :
@@ -510,6 +519,7 @@ Elle s'appuie sur le manifeste et sur les `<file>`, `<folder>` et `<memory>` des
 | Cas | Résultat |
 |---|---|
 | Mod fait pour une autre version du jeu | le jeu ne se lance pas |
+| Paquet fait pour un ancien cœur (`launcher` sous `>=0.6.0`) | refusé à l'installation ; déjà installé, le jeu ne se lance pas |
 | Dépendance absente ou trop ancienne | le jeu ne se lance pas |
 | Conflit déclaré dans `conflicts` | le jeu ne se lance pas |
 | Valeurs différentes à la même adresse mémoire | le jeu ne se lance pas |
@@ -563,35 +573,9 @@ remplacés seulement si le launcher en apporte une version plus récente. Ils ne
 Une nouvelle installation démarre sur `prstance.mode-hiver`.
 
 Une version a les mêmes patchs qu'un mod, `code` compris : elle se lie aux mods activés et reste compatible avec eux.
-Mode Hiver (`prstance.mode-hiver` 2026.12.6) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
+Mode Hiver (`prstance.mode-hiver`) vient de wp-core `mods/winter` : `python3 tools/wpmod_build.py mods/winter`
 en fait un `.wpver` (`"package": "version"` dans son `wpmod.json`), à copier dans `src-tauri/versions/`. Un `.wpver`
 fourni doit être versionné (la CI de release l'embarque).
-
-Ancienne recette, sans le système de mods compatibles, depuis wp-winter (branche `mod/winter`) :
-
-1. Dans wp-winter, `WINTER_DEBUG` à 0 (`include/wp/mr001/winter.h`), puis `ninja` (tout, pas seulement
-   les RELs modifiés : le mode ajoute du code à `main.dol`, donc chaque REL doit être relié au nouveau).
-2. `python3 scripts/winter-settings.py ../../mods/wp-winter/build/SUPP01` (ici) : l'adresse des réglages du mode
-   (`gWinterSettings`, dans `main.dol`) change à chaque build ; le script la reporte dans
-   `themes/mode-hiver/manifest.json` et vérifie que `main.dol` y a bien les valeurs par défaut.
-3. `python3 tools/make_riivolution.py --no-build`. Son paquet ne met pas `main.dol` ni les RELs que le
-   projet ne compile pas : il faut les ajouter comme `tools/run_dolphin.py` les installe, `main.dol` en
-   `<file disc="main.dol" external="sys/main.dol" />` (Dolphin seulement) et les autres RELs reliés par
-   `tools/relink_disc_rels.py`. Sinon le jeu plante dès qu'un module arrive.
-4. Sans `LISEZ-MOI.txt` ni `README.txt` (l'installation sur Wii), on en fait la version :
-
-```sh
-python3 scripts/make-wpmod.py dist/WinterMode --id prstance.mode-hiver --name "Mode Hiver" \
-    --version 2026.11.12 --game SUPP01 --author prstance --conflicts prstance.mode-duo='*' \
-    --conflicts prstance.mode-lave='*' --extra ../../mods/wp-winter/mods/winter/CREDITS.md \
-    --theme themes/mode-hiver --disc "chemin/Wii Party (Europe).rvz" \
-    --out src-tauri/versions/Mode-Hiver-2026.11.12.wpver
-```
-
-Le nom, la description par langue et les réglages (difficulté, yéti, sceau, mur, corde, mini-jeux d'hiver,
-tempête, tenues, bonnets) viennent de `themes/mode-hiver/manifest.json` (pris d'office avec `--theme`, sauf
-si `--manifest` en donne un autre). Le détail de chaque réglage côté jeu est dans wp-winter,
-`docs/winter_mode.md` › « Réglages du launcher ».
 
 ## Mises à jour du launcher
 

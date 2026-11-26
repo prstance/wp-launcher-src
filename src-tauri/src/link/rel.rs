@@ -12,7 +12,7 @@ pub struct MainSymbols {
 }
 
 impl MainSymbols {
-    /// "address section name" per line (wp-core tools/wpcore_pack.py, main.sym); the first of a name wins.
+    /// "address section name" per line (main.sym of the core, wp-srccore tools/core/export.py); the first of a name wins.
     pub fn parse(text: &str) -> Result<MainSymbols, String> {
         let mut by_name = HashMap::new();
         for line in text.lines().filter(|l| !l.trim().is_empty()) {

@@ -158,6 +158,8 @@ def main():
             "authors": [author] if author else [],
             "description": description,
             "games": games,
+            # the oldest launcher that still reads packages (it refuses the ones asking for less)
+            "launcher": ">=0.6.0",
             "patches": patches,
         }
         if settings:

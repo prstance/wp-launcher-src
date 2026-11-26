@@ -58,7 +58,7 @@ def edits_only(dest, ident, waves_from):
              "sounds": {"SEQ_SEBD001_03": {"volume": 70, "priority": 60}},
              "wsd": {"WSD_SEMG000_01": {"note": {"release": 90}, "fx_send": [10, 0, 0], "event": {"length": 0.5}}}}
     (dest / "sound/patch.json").write_text(json.dumps(patch, indent=1), encoding="utf-8")
-    m = {"format": 1, "id": ident, "name": {"fr": ident}, "version": "1.0.0", "games": ["SUPP01"], "launcher": ">=0.4",
+    m = {"format": 1, "id": ident, "name": {"fr": ident}, "version": "1.0.0", "games": ["SUPP01"], "launcher": ">=0.6.0",
          "patches": [{"type": "sound", "archive": "/sound/wp_sound.brsar", "patch": "sound/patch.json"}]}
     (dest / "mod.json").write_text(json.dumps(m, indent=1), encoding="utf-8")
 

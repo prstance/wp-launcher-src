@@ -403,7 +403,7 @@ mod tests {
 
     fn package(path: &Path, version: &str, theme: &str) {
         let manifest = format!(
-            r#"{{"format":1,"id":"a.b","name":"A","version":"{version}","games":["SUPP01"],{theme}
+            r#"{{"format":1,"id":"a.b","name":"A","version":"{version}","games":["SUPP01"],"launcher":">=0.6.0",{theme}
             "patches":[{{"type":"riivolution","xml":"m.xml","options":[{{"section":"S","option":"O","choice":1}}]}}]}}"#
         );
         let xml = r#"<wiidisc version="1"><options><section name="S"><option name="O"><choice name="On"><patch id="p"/></choice></option></section></options><patch id="p"/></wiidisc>"#;

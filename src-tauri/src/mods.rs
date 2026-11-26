@@ -5,6 +5,8 @@
 use crate::game::{data_dir, is_playing};
 use crate::link;
 use crate::i18n::{tr, Text};
+use crate::ranges::{self, Launcher};
+pub use crate::ranges::satisfies;
 use crate::settings::{Disc, Settings, Store, DEV};
 use crate::versions::{self, Theme};
 use base64::Engine;
@@ -28,13 +30,6 @@ const SETTINGS_OPTION: &str = "Settings";
 const FILES_OPTION: &str = "Files";
 /// link/mod.rs link_game's XML.
 const CODE_OPTION: &str = "Code";
-/// The launcher version the packages' "launcher" ranges are checked against, when Cargo.toml's is
-/// older: the first release that reads everything this build reads (the code of core v2: 0.5). Without
-/// use once Cargo.toml's version reaches it (then remove it).
-const READS_PACKAGES_OF: &str = "0.5.0";
-/// The first launcher with core v2 (wp-srccore docs/core.md): a package with code that asks for less
-/// was built against the old core's symbols.
-const CORE_V2: &str = ">=0.5";
 
 /// Saved values of the packages' settings: package id -> setting id -> value.
 pub type Values = BTreeMap<String, BTreeMap<String, i64>>;
@@ -60,7 +55,8 @@ pub struct Manifest {
     #[serde(default)]
     pub description: Text,
     pub games: Vec<String>,
-    /// The launcher versions it needs, ">=0.2": an older one asks to be updated.
+    /// The launcher versions it needs, ">=0.6.0" at least (ranges.rs READS_PACKAGES_OF): an older
+    /// launcher asks to be updated, a package that asks for less is refused (made for an older core).
     #[serde(default)]
     launcher: Option<String>,
     /// SVG or PNG inside the package.
@@ -134,10 +130,10 @@ pub struct DeltaFile {
 }
 
 impl Manifest {
-    /// Its code was built for the old core (wp-core's binary patches of main.dol), which core v2 replaced.
-    fn for_old_core(&self) -> bool {
-        let least = self.launcher.as_deref().and_then(|r| r.strip_prefix(">="));
-        self.patches.iter().any(|p| p.kind == "code") && !least.is_some_and(|v| satisfies(v, CORE_V2))
+    /// Made for an older core than this launcher's ("launcher" below ranges.rs READS_PACKAGES_OF, or
+    /// none): refused, its mod has to be updated.
+    fn for_an_old_core(&self) -> bool {
+        ranges::launcher(self.launcher.as_deref()) == Launcher::Old
     }
 
     /// The files the package makes from the disc.
@@ -612,39 +608,17 @@ pub fn is_inside(path: &str) -> bool {
     Path::new(path.trim_start_matches('/')).components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
-fn numbers(version: &str) -> Vec<u64> {
-    version.split('.').map(|n| n.trim().parse().unwrap_or(0)).collect()
-}
-
-fn range_is_valid(range: &str) -> bool {
-    range == "*" || range.strip_prefix(">=").is_some_and(|v| v.split('.').all(|n| n.trim().parse::<u64>().is_ok()))
-}
-
-pub fn satisfies(version: &str, range: &str) -> bool {
-    let Some(least) = range.strip_prefix(">=") else { return true };
-    let (mut have, mut want) = (numbers(version), numbers(least));
-    let len = have.len().max(want.len());
-    have.resize(len, 0);
-    want.resize(len, 0);
-    have >= want
-}
-
-/// The version a package's "launcher" range is checked against (READS_PACKAGES_OF).
-fn launcher_version() -> &'static str {
-    let own = env!("CARGO_PKG_VERSION");
-    if satisfies(own, &format!(">={READS_PACKAGES_OF}")) { own } else { READS_PACKAGES_OF }
+/// What its "launcher" range says (ranges.rs).
+fn check_launcher(range: Option<&str>) -> Result<(), String> {
+    match ranges::launcher(range) {
+        Launcher::Reads => Ok(()),
+        Launcher::Old => Err(tr!("il a été fait pour un ancien cœur des mods : il faut mettre le mod à jour")),
+        Launcher::Newer => Err(tr!("il demande une version plus récente du launcher ({range}) : mets PartyLauncher à jour dans Paramètres › À propos", range = range.unwrap_or_default())),
+        Launcher::Invalid => Err(tr!("la plage de versions « {range} » n’est pas valide", range = range.unwrap_or_default())),
+    }
 }
 
 fn validate(m: &Manifest) -> Result<(), String> {
-    // (first: a newer package may have a format or patches this launcher doesn't know)
-    if let Some(range) = &m.launcher {
-        if !range_is_valid(range) {
-            return Err(tr!("la plage de versions « {range} » n’est pas valide", range = range));
-        }
-        if !satisfies(launcher_version(), range) {
-            return Err(tr!("il demande une version plus récente du launcher ({range}) : mets PartyLauncher à jour dans Paramètres › À propos", range = range));
-        }
-    }
     if m.format != FORMAT {
         return Err(tr!("ce paquet utilise le format {format}, que ce launcher ne connaît pas", format = m.format));
     }
@@ -659,7 +633,7 @@ fn validate(m: &Manifest) -> Result<(), String> {
     if m.games.is_empty() {
         return Err(tr!("il n’indique pas pour quelle version du jeu il est fait"));
     }
-    if let Some(range) = m.requires.values().chain(m.conflicts.values()).find(|r| !range_is_valid(r)) {
+    if let Some(range) = m.requires.values().chain(m.conflicts.values()).find(|r| !ranges::range_is_valid(r)) {
         return Err(tr!("la plage de versions « {range} » n’est pas valide", range = range));
     }
     if let Some(id) = m.minigame_names.keys().find(|id| id.parse::<i32>().is_err()) {
@@ -683,6 +657,9 @@ fn validate(m: &Manifest) -> Result<(), String> {
         }
         if patch.kind == "code" && patch.modules.is_empty() {
             return Err(tr!("il ne contient aucun patch"));
+        }
+        if let Some(module) = patch.modules.iter().find(|(_, c)| c.save.is_some()).map(|(m, _)| m) {
+            return Err(tr!("son module « {module} » a « save », qui n’existe plus : la sauvegarde du plateau passe par wpBoardSave du cœur", module = module));
         }
         let archive_ok = patch.archive.starts_with('/') && is_inside(&patch.archive) && patch.archive.to_ascii_lowercase().ends_with(".brsar");
         if patch.kind == "sound" && (!archive_ok || patch.patch.trim_matches('/').is_empty() || !is_inside(&patch.patch)) {
@@ -913,7 +890,17 @@ fn read_sound(package: &Path, patch: &str) -> Result<crate::sound::Claims, Strin
     Ok(claims)
 }
 
+/// Its "launcher" range alone, checked before the rest is read: a newer package may have a format or
+/// patches this launcher doesn't know, an older one fields it no longer reads.
+#[derive(Deserialize)]
+struct Gate {
+    #[serde(default)]
+    launcher: Option<String>,
+}
+
 fn read_manifest(kind: &Kind, text: &str) -> Result<Manifest, String> {
+    let gate: Gate = serde_json::from_str(text).map_err(|e| tr!("son {manifest} est invalide : {e}", manifest = kind.manifest, e = e))?;
+    check_launcher(gate.launcher.as_deref())?;
     let mut manifest: Manifest = serde_json::from_str(text).map_err(|e| tr!("son {manifest} est invalide : {e}", manifest = kind.manifest, e = e))?;
     setting_numbers(&mut manifest)?;
     validate(&manifest)?;
@@ -1038,9 +1025,22 @@ pub fn installed(kind: &Kind, dir: &Path, saved: &Values) -> Vec<Installed> {
     mods
 }
 
-/// The package unpacked in `dir`, if it is a valid one.
+/// The package unpacked in `dir`, if it is a valid one, or one made for an older core (installed before
+/// this launcher): that one stays in the list, with nothing read of its files, for check to say it has
+/// to be updated.
 fn load(kind: &Kind, dir: PathBuf, saved: &Values) -> Option<Installed> {
-    let manifest = read_manifest(kind, &std::fs::read_to_string(dir.join(kind.manifest)).ok()?).ok()?;
+    let text = std::fs::read_to_string(dir.join(kind.manifest)).ok()?;
+    let Ok(manifest) = read_manifest(kind, &text) else {
+        let mut manifest: Manifest = serde_json::from_str(&text).ok().filter(Manifest::for_an_old_core)?;
+        setting_numbers(&mut manifest).ok()?;
+        // (its theme and icon are still shown)
+        (kind.check)(&dir, &manifest).ok()?;
+        if let Some(icon) = &manifest.icon {
+            check_image(&dir, icon, MAX_ICON).ok()?;
+        }
+        let values = resolve(&manifest, saved);
+        return Some(Installed { manifest, dir, values, footprint: Footprint::default() });
+    };
     let values = resolve(&manifest, saved);
     let footprint = read_contents(kind, &dir, &manifest, &values).ok()?;
     Some(Installed { manifest, dir, values, footprint })
@@ -1097,8 +1097,8 @@ fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
         if let Some(game) = game.filter(|g| !m.games.iter().any(|ok| ok == g)) {
             error(tr!("« {name} » ne fonctionne pas sur ton ISO ({game}). Il demande : {games}.", name = name, game = game, games = m.games.join(", ")), &[&m.id]);
         }
-        if m.for_old_core() {
-            error(tr!("« {name} » a été fait pour l’ancien cœur des mods : il faut sa nouvelle version.", name = name), &[&m.id]);
+        if m.for_an_old_core() {
+            error(tr!("« {name} » a été fait pour un ancien cœur des mods : il faut mettre le mod à jour.", name = name), &[&m.id]);
         }
         for (id, range) in &m.requires {
             match mods.iter().find(|o| &o.manifest.id == id) {
@@ -1864,7 +1864,7 @@ mod tests {
 
     fn manifest(id: &str, extra: &str) -> String {
         format!(
-            r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.2.0","games":["SUPP01"],{extra}
+            r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.2.0","games":["SUPP01"],"launcher":">=0.6.0",{extra}
             "patches":[{{"type":"riivolution","xml":"riivolution/m.xml","options":[{{"section":"S","option":"O","choice":1}}]}}]}}"#
         )
     }
@@ -1984,10 +1984,10 @@ mod tests {
     /// A mod of the compatible system: code, files and texts, no Riivolution XML.
     fn code_mod_with(dir: &Path, id: &str, text: &str, setting_module: &str) -> Result<Installed, String> {
         let json = format!(
-            r#"{{"format":1,"id":"{id}","name":"{id}","version":"2.0.0","games":["SUPP01"],"launcher":">=0.5",
+            r#"{{"format":1,"id":"{id}","name":"{id}","version":"2.0.0","games":["SUPP01"],"launcher":">=0.6.0",
             "settings":[{{"id":"r","type":"number","label":"R","default":14,"min":8,"max":25,"symbol":{{"module":"{setting_module}","name":"gR"}}}}],
             "messages":{{"fr_EU":{{"m031_2700":"{text}"}}}},
-            "patches":[{{"type":"code","modules":{{"mr001":{{"objects":["code/x.o"],"hooks":{{"Board_start":"F"}},"save":{{"symbol":"gAt","size":2}}}}}}}},
+            "patches":[{{"type":"code","modules":{{"mr001":{{"objects":["code/x.o"],"hooks":{{"Board_start":"F"}}}}}}}},
                        {{"type":"files","files":[{{"disc":"/mr001/Lava.brres.lz","file":"lava.brres.lz"}}]}}]}}"#
         );
         let path = dir.join("in").join(format!("{id}.wpmod"));
@@ -2015,19 +2015,18 @@ mod tests {
     #[test]
     fn reads_sound_patches() {
         let dir = scratch("sound");
-        // (packages with sounds ask for 0.4: this build reads them)
-        let a = sound_mod_with(&dir, "a", "GROUP_MOD_A", ">=0.4", "g.rwsd").unwrap();
+        let a = sound_mod_with(&dir, "a", "GROUP_MOD_A", ">=0.6.0", "g.rwsd").unwrap();
         assert_eq!(a.footprint.linked, ["/sound/wp_sound.brsar"]);
         assert_eq!(code_mod(&a).sounds, [link::SoundSpec { archive: "/sound/wp_sound.brsar".into(), patch: "sound/wp_sound/patch.json".into() }]);
-        assert!(sound_mod_with(&dir, "later", "GROUP_MOD_L", ">=0.6", "g.rwsd").err().unwrap().contains("0.6"));
-        assert!(sound_mod_with(&dir, "missing", "GROUP_MOD_M", ">=0.4", "nope.rwsd").err().unwrap().contains("nope.rwsd"));
-        assert!(sound_mod_with(&dir, "escape", "GROUP_MOD_E", ">=0.4", "../../mod.json").err().unwrap().contains("hors du paquet"));
+        assert!(sound_mod_with(&dir, "later", "GROUP_MOD_L", ">=99", "g.rwsd").err().unwrap().contains("plus récente"));
+        assert!(sound_mod_with(&dir, "missing", "GROUP_MOD_M", ">=0.6.0", "nope.rwsd").err().unwrap().contains("nope.rwsd"));
+        assert!(sound_mod_with(&dir, "escape", "GROUP_MOD_E", ">=0.6.0", "../../mod.json").err().unwrap().contains("hors du paquet"));
         // the same game sound edited: a warning; the same group added: they can't run together
-        let b = sound_mod_with(&dir, "b", "GROUP_MOD_B", ">=0.4", "g.rwsd").unwrap();
+        let b = sound_mod_with(&dir, "b", "GROUP_MOD_B", ">=0.6.0", "g.rwsd").unwrap();
         let problems = check(&[&a, &b], None);
         assert_eq!(levels(&problems), ["warning"], "{problems:?}");
         assert!(problems[0].message.contains("SEQ_SEBD001_03.volume"));
-        let twin = sound_mod_with(&dir, "twin", "GROUP_MOD_A", ">=0.4", "g.rwsd").unwrap();
+        let twin = sound_mod_with(&dir, "twin", "GROUP_MOD_A", ">=0.6.0", "g.rwsd").unwrap();
         assert_eq!(levels(&only_what_matters(check(&[&a, &twin], None))), ["error"]);
         // a mod that replaces the archive whole can't run with them
         let whole = mod_with(&dir, "whole", "", r#"<file disc="/sound/wp_sound.brsar" external="a.bin"/>"#);
@@ -2040,7 +2039,7 @@ mod tests {
         let dir = scratch("mii-setting");
         let json = |size: u32, kind: &str| {
             format!(
-                r#"{{"format":1,"id":"m","name":"m","version":"1.0.0","games":["SUPP01"],
+                r#"{{"format":1,"id":"m","name":"m","version":"1.0.0","games":["SUPP01"],"launcher":">=0.6.0",
                 "settings":[{{"id":"cpu","type":"{kind}","label":"CPU","default":0,"symbol":{{"module":"menu","name":"gMiis","size":{size},"offset":8}}}}],
                 "patches":[{{"type":"code","modules":{{"menu":{{"objects":["code/x.o"]}}}}}}]}}"#
             )
@@ -2076,7 +2075,7 @@ mod tests {
         let e = code_mod_with(&dir, "bad", "x", "main").err().unwrap();
         assert!(e.contains("variable"), "{e}");
         // the resident code: its own file
-        let json = r#"{"format":1,"id":"res","name":"res","version":"1.0.0","games":["SUPP01"],"launcher":">=0.5",
+        let json = r#"{"format":1,"id":"res","name":"res","version":"1.0.0","games":["SUPP01"],"launcher":">=0.6.0",
             "patches":[{"type":"code","modules":{"resident":{"objects":["code/r.o"],"hooks":{"Scene_loaded":"R_loaded"}}}}]}"#;
         let path = dir.join("in").join("res.wpmod");
         package(&path, &[("mod.json", json), ("code/r.o", "o")]);
@@ -2112,48 +2111,60 @@ mod tests {
         let on = debug_tools(&saved(r#"{"partylauncher.debug":{"des":1,"mini-jeux":2}}"#)).unwrap();
         assert!(on.debug_on());
         assert!(code_mod(&on).writes.contains(&("mr001".into(), "gDebugDice".into(), 0, vec![0, 0, 0, 1])));
-        // before Winter Mode; linked with the launcher's core
+        // before the version; linked with the launcher's core
         let dir = scratch("tools");
-        let wpver = std::fs::read_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("versions")).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "wpver")).unwrap();
-        install(&versions::WPVER, &wpver, &dir.join("mods")).unwrap();
-        let winter = installed(&versions::WPVER, &dir.join("mods"), &Values::new()).pop().unwrap();
-        assert_eq!(load_order(Some(&off), Some(&winter), &[], &[]).len(), 1);
-        let order = load_order(Some(&on), Some(&winter), &[], &[]);
+        let version = mod_with(&dir, "v", "", "");
+        assert_eq!(load_order(Some(&off), Some(&version), &[], &[]).len(), 1);
+        let order = load_order(Some(&on), Some(&version), &[], &[]);
         assert_eq!(order[0].manifest.id, DEBUG_TOOLS);
-        if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &[code_mod(&on)]) {
+        let core = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core");
+        if let Err(e) = link::check_code(&core, &[code_mod(&on)]) {
             panic!("{}", e.message);
         }
-        // (the shipped version too, once it is one for core v2)
-        let code: Vec<link::CodeMod> = order.iter().map(|m| code_mod(m)).collect();
-        if !winter.manifest.for_old_core() {
-            if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &code) {
+        // with the shipped version too, once it is one for this launcher
+        let wpver = std::fs::read_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("versions")).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "wpver")).unwrap();
+        if install(&versions::WPVER, &wpver, &dir.join("versions")).is_ok() {
+            let winter = installed(&versions::WPVER, &dir.join("versions"), &Values::new()).pop().unwrap();
+            let code: Vec<link::CodeMod> = load_order(Some(&on), Some(&winter), &[], &[]).iter().map(|m| code_mod(m)).collect();
+            if let Err(e) = link::check_code(&core, &code) {
                 panic!("{}", e.message);
             }
         }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// A package for an older launcher (and core): refused, and one installed before kept in the list with
+    /// what to do.
     #[test]
-    fn code_for_the_old_core_needs_its_new_version() {
+    fn a_package_for_an_old_core_is_refused() {
         let dir = scratch("old-core");
-        let new = code_mod_with(&dir, "new", "texte", "mr001").unwrap();
-        assert!(!new.manifest.for_old_core());
-        for (id, launcher) in [("old", r#""launcher":">=0.4","#), ("older", "")] {
-            let json = format!(
+        let json = |id: &str, launcher: &str, part: &str| {
+            format!(
                 r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.0.0","games":["SUPP01"],{launcher}
-                "patches":[{{"type":"code","modules":{{"main":{{"objects":["code/x.o"]}}}}}}]}}"#
-            );
+                "patches":[{{"type":"code","modules":{{"mr001":{{"objects":["code/x.o"]{part}}}}}}}]}}"#
+            )
+        };
+        let new = code_mod_with(&dir, "new", "texte", "mr001").unwrap();
+        assert!(!new.manifest.for_an_old_core());
+        for (id, launcher) in [("old", r#""launcher":">=0.5","#), ("older", r#""launcher":">=0.2","#), ("any", r#""launcher":"*","#), ("none", "")] {
             let path = dir.join("in").join(format!("{id}.wpmod"));
-            package(&path, &[("mod.json", &json), ("code/x.o", "o")]);
-            install(&WPMOD, &path, &dir.join("mods")).unwrap();
+            package(&path, &[("mod.json", &json(id, launcher, "")), ("code/x.o", "o")]);
+            let why = install(&WPMOD, &path, &dir.join("mods")).err().unwrap_or_else(|| panic!("{id} accepté"));
+            assert!(why.contains("ancien cœur des mods") && why.contains("mettre le mod à jour"), "{id} : {why}");
+            // one an older launcher installed: listed, and the launch refused with the same words
+            let there = dir.join("mods").join(id);
+            std::fs::create_dir_all(there.join("code")).unwrap();
+            std::fs::write(there.join("mod.json"), json(id, launcher, r#","save":{"symbol":"gAt","size":2}"#)).unwrap();
             let old = installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap();
             let problems = check(&[&new, &old], None);
             assert_eq!(levels(&problems), ["error"], "{problems:?}");
             assert!(problems[0].message.contains("ancien cœur") && problems[0].packages == [id], "{problems:?}");
         }
-        // a package without code needs nothing of the core
-        let sound = sound_mod_with(&dir, "s", "GROUP_A", ">=0.4", "g.rwsd").unwrap();
-        assert!(!sound.manifest.for_old_core());
+        // the board's save is no longer the manifest's
+        let path = dir.join("in").join("save.wpmod");
+        package(&path, &[("mod.json", &json("save", r#""launcher":">=0.6.0","#, r#","save":{"symbol":"gAt","size":2}"#)), ("code/x.o", "o")]);
+        let why = install(&WPMOD, &path, &dir.join("mods")).err().unwrap();
+        assert!(why.contains("« save »") && why.contains("wpBoardSave"), "{why}");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2301,7 +2312,7 @@ mod tests {
         let dir = scratch("float");
         let json = |settings: &str| {
             format!(
-                r#"{{"format":1,"id":"f","name":"f","version":"1.0.0","games":["SUPP01"],"launcher":">=0.5","settings":[{settings}],
+                r#"{{"format":1,"id":"f","name":"f","version":"1.0.0","games":["SUPP01"],"launcher":">=0.6.0","settings":[{settings}],
                 "patches":[{{"type":"code","modules":{{"main":{{"objects":["code/x.o"]}}}}}}]}}"#
             )
         };
@@ -2381,13 +2392,5 @@ mod tests {
     fn disc_paths_read_the_same_on_every_system() {
         assert_eq!(disc_path("/Rel/X.bin"), "/rel/x.bin");
         assert_eq!(disc_path("/mr001/sub\\Y.bin"), "/mr001/sub/y.bin");
-    }
-
-    #[test]
-    fn compares_versions() {
-        assert!(satisfies("1.2.0", ">=1.2"));
-        assert!(satisfies("1.10", ">=1.2"));
-        assert!(!satisfies("1.1.9", ">=1.2"));
-        assert!(satisfies("0.1", "*"));
     }
 }

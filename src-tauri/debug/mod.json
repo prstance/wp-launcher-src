@@ -162,7 +162,7 @@
       }
     }
   ],
-  "launcher": ">=0.5",
+  "launcher": ">=0.6.0",
   "patches": [
     {
       "type": "code",
