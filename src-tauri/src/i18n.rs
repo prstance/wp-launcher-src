@@ -110,6 +110,8 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("il manque un texte", "a text is missing", "falta un texto"),
     ("ses choix sont vides ou en double", "its choices are empty or repeated", "sus opciones están vacías o repetidas"),
     ("ses bornes ne vont pas", "its bounds don’t work", "sus límites no son válidos"),
+    ("« {n} » n’est pas un entier (un décimal demande « float » dans son « symbol »)", "“{n}” isn’t a whole number (a decimal needs “float” in its “symbol”)", "«{n}» no es un número entero (un decimal necesita «float» en su «symbol»)"),
+    ("« float » ne va qu’à un choix ou un nombre écrit sur 4 octets", "“float” only fits a choice or a number written in 4 bytes", "«float» solo sirve para una opción o un número escrito en 4 bytes"),
     ("sa valeur par défaut n’est pas permise", "its default value isn’t allowed", "su valor por defecto no está permitido"),
     ("{xml} n’est pas un patch du paquet", "{xml} isn’t one of the package’s patches", "{xml} no es un parche del paquete"),
     ("l’option « {option} » est déjà choisie par le paquet", "the package already picks the option “{option}”", "el paquete ya elige la opción «{option}»"),

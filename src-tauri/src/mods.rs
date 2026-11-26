@@ -169,18 +169,31 @@ struct Setting {
     label: Text,
     #[serde(default)]
     description: Option<Text>,
-    #[serde(default)]
+    /// Its numbers as mod.json gives them: integers, or decimals with `symbol.float` (setting_numbers()).
+    #[serde(rename = "default", default)]
+    raw_default: Option<serde_json::Number>,
+    #[serde(rename = "min", default)]
+    raw_min: Option<serde_json::Number>,
+    #[serde(rename = "max", default)]
+    raw_max: Option<serde_json::Number>,
+    #[serde(rename = "step", default)]
+    raw_step: Option<serde_json::Number>,
+    /// Its values as the launcher keeps them (saved, written): a float setting's are its f32 bits.
+    #[serde(skip)]
     default: i64,
     /// "choice": what the list offers.
     #[serde(default)]
     choices: Vec<SettingChoice>,
-    /// "number": its bounds and steps.
-    #[serde(default)]
+    /// "number": its bounds and steps (a float one: `float`'s).
+    #[serde(skip)]
     min: i64,
-    #[serde(default)]
+    #[serde(skip)]
     max: i64,
-    #[serde(default = "one")]
+    #[serde(skip)]
     step: i64,
+    /// A float setting (symbol.float): its bounds and step as decimals (a "number").
+    #[serde(skip)]
+    float: Option<(f64, f64, f64)>,
     #[serde(default)]
     riivolution: Option<Binding>,
     #[serde(default)]
@@ -194,7 +207,9 @@ struct Setting {
     debug: bool,
 }
 
-/// `size` bytes at `offset` in the variable `name` of the mod's code in `module`.
+/// `size` bytes at `offset` in the variable `name` of the mod's code in `module`. `float`: the setting's
+/// numbers (default, min, max, step, choices' values, presets' values for it) are decimals, written as
+/// the bits of an f32 (4 bytes).
 #[derive(Deserialize, Clone)]
 struct SymbolSlot {
     module: String,
@@ -203,15 +218,84 @@ struct SymbolSlot {
     size: u32,
     #[serde(default)]
     offset: u32,
+    #[serde(default)]
+    float: bool,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Clone)]
 struct SettingChoice {
+    #[serde(rename = "value")]
+    raw_value: serde_json::Number,
+    #[serde(skip)]
     value: i64,
     label: Text,
     /// A preset's: the values it gives other settings.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(rename = "sets", default)]
+    raw_sets: BTreeMap<String, serde_json::Number>,
+    #[serde(skip)]
     sets: BTreeMap<String, i64>,
+}
+
+/// A float setting's value: the bits of the nearest f32.
+fn float_bits(x: f64) -> i64 {
+    (x as f32).to_bits() as i64
+}
+
+/// The decimal a float setting's value shows: the shortest one that is the same f32.
+fn float_of(bits: i64) -> f64 {
+    format!("{}", f32::from_bits(bits as u32)).parse().unwrap_or(f64::NAN)
+}
+
+/// Its numbers as the launcher keeps them: an integer as it is, a float setting's decimals as their f32
+/// bits. A decimal without `symbol.float` is refused.
+fn setting_numbers(m: &mut Manifest) -> Result<(), String> {
+    let floats: Vec<String> = m.settings.iter().filter(|s| s.is_float()).map(|s| s.id.clone()).collect();
+    for s in &mut m.settings {
+        let fail = |why: String| tr!("son réglage « {id} » : {why}", id = s.id, why = why);
+        let float = s.is_float();
+        let read = |n: &serde_json::Number, float: bool| -> Result<i64, String> {
+            match (float, n.as_i64(), n.as_f64()) {
+                (true, _, Some(x)) if x.is_finite() => Ok(float_bits(x)),
+                (false, Some(v), _) => Ok(v),
+                _ => Err(tr!("« {n} » n’est pas un entier (un décimal demande « float » dans son « symbol »)", n = n)),
+            }
+        };
+        let zero = serde_json::Number::from(0);
+        s.default = read(s.raw_default.as_ref().unwrap_or(&zero), float).map_err(&fail)?;
+        for c in &mut s.choices {
+            c.value = read(&c.raw_value, float).map_err(&fail)?;
+            c.sets = c.raw_sets.iter().map(|(id, v)| Ok((id.clone(), read(v, floats.contains(id))?))).collect::<Result<_, String>>().map_err(&fail)?;
+        }
+        if float && s.kind == "number" {
+            let decimal = |n: &Option<serde_json::Number>, or: f64| n.as_ref().and_then(|n| n.as_f64()).unwrap_or(or);
+            let (min, max, step) = (decimal(&s.raw_min, 0.0), decimal(&s.raw_max, 0.0), decimal(&s.raw_step, 1.0));
+            s.float = Some((min, max, step));
+            (s.min, s.max, s.step) = (float_bits(min), float_bits(max), 1);
+        } else {
+            s.min = read(s.raw_min.as_ref().unwrap_or(&zero), false).map_err(&fail)?;
+            s.max = read(s.raw_max.as_ref().unwrap_or(&zero), false).map_err(&fail)?;
+            s.step = read(s.raw_step.as_ref().unwrap_or(&serde_json::Number::from(1)), false).map_err(&fail)?;
+        }
+    }
+    Ok(())
+}
+
+/// One of a setting's numbers, for its page: a float setting's as a decimal.
+fn shown(setting: &Setting, value: i64) -> serde_json::Value {
+    if setting.is_float() {
+        json!(float_of(value))
+    } else {
+        json!(value)
+    }
+}
+
+/// A choice on a setting's page.
+#[derive(Serialize)]
+struct ChoiceView {
+    value: serde_json::Value,
+    label: Text,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    sets: BTreeMap<String, serde_json::Value>,
 }
 
 /// A Riivolution option of one of the package's XML. A toggle turns on its choice
@@ -266,6 +350,19 @@ impl Slot {
 }
 
 impl Setting {
+    fn is_float(&self) -> bool {
+        self.symbol.as_ref().is_some_and(|s| s.float)
+    }
+
+    /// A value from its page (a float setting's: a decimal).
+    fn from_page(&self, value: f64) -> Option<i64> {
+        if self.is_float() {
+            Some(float_bits(value))
+        } else {
+            (value.fract() == 0.0 && value.abs() < 9e15).then_some(value as i64)
+        }
+    }
+
     fn is_preset(&self) -> bool {
         self.kind == "choice" && self.choices.iter().any(|c| !c.sets.is_empty())
     }
@@ -281,7 +378,16 @@ impl Setting {
             "toggle" => value == 0 || value == 1,
             "choice" => self.choices.iter().any(|c| c.value == value),
             "mii" => crate::mii::is_setting_key(value),
-            _ => (self.min..=self.max).contains(&value) && (value - self.min) % self.step == 0,
+            _ => match self.float {
+                // on a step from min (to an f32's precision)
+                Some((min, max, step)) => {
+                    let x = f32::from_bits(value as u32) as f64;
+                    let steps = (x - min) / step;
+                    let near = 1e-4 * steps.abs().max(1.0);
+                    value >= 0 && value <= u32::MAX as i64 && x.is_finite() && x >= min - near * step && x <= max + near * step && (steps - steps.round()).abs() <= near
+                }
+                None => (self.min..=self.max).contains(&value) && (value - self.min) % self.step == 0,
+            },
         }
     }
 
@@ -330,8 +436,12 @@ fn check_setting(m: &Manifest, setting: &Setting) -> Result<(), String> {
             return fail(tr!("ses choix sont vides ou en double"));
         }
     }
-    if setting.kind == "number" && (setting.min > setting.max || setting.step < 1) {
+    let bad_float = setting.float.is_some_and(|(min, max, step)| !(min.is_finite() && max.is_finite() && min <= max && step > 0.0));
+    if setting.kind == "number" && (bad_float || (setting.float.is_none() && (setting.min > setting.max || setting.step < 1))) {
         return fail(tr!("ses bornes ne vont pas"));
+    }
+    if setting.is_float() && (!["choice", "number"].contains(&setting.kind.as_str()) || setting.symbol.as_ref().is_some_and(|s| s.size != 4)) {
+        return fail(tr!("« float » ne va qu’à un choix ou un nombre écrit sur 4 octets"));
     }
     if !setting.allows(setting.default) {
         return fail(tr!("sa valeur par défaut n’est pas permise"));
@@ -767,8 +877,11 @@ fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String,
         footprint.sources.insert(disc_path(&file.disc), package.join(&file.file));
     }
     for patch in manifest.patches.iter().filter(|p| p.kind == "code") {
-        // (main.dol's code goes in memory: the linker tells the clashes)
-        footprint.linked.extend(patch.modules.keys().filter(|m| *m != "main").map(|m| disc_path(&format!("/rel/{m}.rel.lz"))));
+        // (main.dol's code goes in memory: the linker tells the clashes; the resident code in its module)
+        footprint.linked.extend(patch.modules.keys().filter(|m| *m != "main").map(|m| match m.as_str() {
+            link::resident::MODULE => disc_path(link::resident::FILE),
+            _ => disc_path(&format!("/rel/{m}.rel.lz")),
+        }));
     }
     for patch in manifest.patches.iter().filter(|p| p.kind == "sound") {
         footprint.linked.push(disc_path(&patch.archive));
@@ -801,7 +914,8 @@ fn read_sound(package: &Path, patch: &str) -> Result<crate::sound::Claims, Strin
 }
 
 fn read_manifest(kind: &Kind, text: &str) -> Result<Manifest, String> {
-    let manifest: Manifest = serde_json::from_str(text).map_err(|e| tr!("son {manifest} est invalide : {e}", manifest = kind.manifest, e = e))?;
+    let mut manifest: Manifest = serde_json::from_str(text).map_err(|e| tr!("son {manifest} est invalide : {e}", manifest = kind.manifest, e = e))?;
+    setting_numbers(&mut manifest)?;
     validate(&manifest)?;
     Ok(manifest)
 }
@@ -1535,12 +1649,13 @@ pub struct SettingView {
     kind: String,
     label: Text,
     description: Option<Text>,
-    default: i64,
-    value: i64,
-    choices: Vec<SettingChoice>,
-    min: i64,
-    max: i64,
-    step: i64,
+    /// (a float setting's numbers are decimals)
+    default: serde_json::Value,
+    value: serde_json::Value,
+    choices: Vec<ChoiceView>,
+    min: serde_json::Value,
+    max: serde_json::Value,
+    step: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -1600,25 +1715,28 @@ fn setting_views(package: &Installed, debug: bool) -> Vec<SettingView> {
             kind: s.kind.clone(),
             label: s.label.clone(),
             description: s.description.clone(),
-            default: s.default,
-            value: package.values.get(&s.id).copied().unwrap_or(s.default),
-            choices: s.choices.clone(),
-            min: s.min,
-            max: s.max,
-            step: s.step,
+            default: shown(s, s.default),
+            value: shown(s, package.values.get(&s.id).copied().unwrap_or(s.default)),
+            choices: s
+                .choices
+                .iter()
+                .map(|c| {
+                    let sets = c.sets.iter().map(|(id, v)| (id.clone(), package.manifest.settings.iter().find(|t| &t.id == id).map_or(json!(v), |t| shown(t, *v)))).collect();
+                    ChoiceView { value: shown(s, c.value), label: c.label.clone(), sets }
+                })
+                .collect(),
+            min: s.float.map_or(json!(s.min), |f| json!(f.0)),
+            max: s.float.map_or(json!(s.max), |f| json!(f.1)),
+            step: s.float.map_or(json!(s.step), |f| json!(f.2)),
         })
         .collect()
 }
 
 /// Saves the values of the package's settings on its page, or of its test tools (`debug`), and keeps
 /// the others'; none: those back to their defaults. They apply from the next launch.
-fn save_values(app: &AppHandle, package: &Installed, values: BTreeMap<String, i64>, debug: bool) -> Result<(), String> {
+fn save_values(app: &AppHandle, package: &Installed, values: BTreeMap<String, f64>, debug: bool) -> Result<(), String> {
     let settings = &package.manifest.settings;
-    for (key, value) in &values {
-        if !settings.iter().any(|s| &s.id == key && s.debug == debug && s.allows(*value)) {
-            return Err(tr!("La valeur {value} n’est pas permise pour « {setting} ».", value = value, setting = key));
-        }
-    }
+    let values = page_values(settings, values, debug)?;
     let id = &package.manifest.id;
     app.state::<Store>().update(app, |s| {
         let mut kept = s.package_settings.remove(id).unwrap_or_default();
@@ -1662,9 +1780,22 @@ pub async fn package_detail(app: AppHandle, id: String) -> Result<Detail, String
     })
 }
 
+/// The values a package's page gives (a float setting's: decimals) as the launcher keeps them, if
+/// allowed.
+fn page_values(settings: &[Setting], values: BTreeMap<String, f64>, debug: bool) -> Result<BTreeMap<String, i64>, String> {
+    let mut kept = BTreeMap::new();
+    for (key, value) in values {
+        let refused = || tr!("La valeur {value} n’est pas permise pour « {setting} ».", value = value, setting = key);
+        let setting = settings.iter().find(|s| s.id == key && s.debug == debug).ok_or_else(refused)?;
+        let v = setting.from_page(value).filter(|v| setting.allows(*v)).ok_or_else(refused)?;
+        kept.insert(key, v);
+    }
+    Ok(kept)
+}
+
 /// Saves the values of the settings on a package's page; none: back to the defaults.
 #[tauri::command]
-pub async fn package_settings_set(app: AppHandle, id: String, values: BTreeMap<String, i64>) -> Result<Detail, String> {
+pub async fn package_settings_set(app: AppHandle, id: String, values: BTreeMap<String, f64>) -> Result<Detail, String> {
     let settings = app.state::<Store>().get(&app);
     let (mods, versions, _) = everything(&app, &settings)?;
     let package = mods.iter().chain(&versions).find(|m| m.manifest.id == id).ok_or_else(|| tr!("Ce mod n’est plus installé."))?;
@@ -1709,7 +1840,7 @@ pub async fn debug_state(app: AppHandle) -> Result<DebugState, String> {
 
 /// Saves the values of a package's test tools; none: back to their defaults.
 #[tauri::command]
-pub async fn debug_settings_set(app: AppHandle, id: String, values: BTreeMap<String, i64>) -> Result<DebugState, String> {
+pub async fn debug_settings_set(app: AppHandle, id: String, values: BTreeMap<String, f64>) -> Result<DebugState, String> {
     let settings = app.state::<Store>().get(&app);
     let (mods, versions, _) = everything(&app, &settings)?;
     let tools = debug_tools(&settings.package_settings);
@@ -1944,6 +2075,14 @@ mod tests {
         assert!(files_xml(&a).unwrap().contains(r#"<file disc="/mr001/Lava.brres.lz" external="/lava.brres.lz" create="true"/>"#));
         let e = code_mod_with(&dir, "bad", "x", "main").err().unwrap();
         assert!(e.contains("variable"), "{e}");
+        // the resident code: its own file
+        let json = r#"{"format":1,"id":"res","name":"res","version":"1.0.0","games":["SUPP01"],"launcher":">=0.5",
+            "patches":[{"type":"code","modules":{"resident":{"objects":["code/r.o"],"hooks":{"Scene_loaded":"R_loaded"}}}}]}"#;
+        let path = dir.join("in").join("res.wpmod");
+        package(&path, &[("mod.json", json), ("code/r.o", "o")]);
+        install(&WPMOD, &path, &dir.join("mods")).unwrap();
+        let res = installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == "res").unwrap();
+        assert_eq!(res.footprint.linked, ["/wp/wpmods.rel"]);
 
         // texts: the same key, two texts
         let b = code_mod_with(&dir, "b", "autre", "mr001").unwrap();
@@ -2152,6 +2291,58 @@ mod tests {
         assert_eq!(read(r#"{"de":4}"#)["niveau"], 9);
         // (a saved value of the preset itself is not what decides it)
         assert_eq!(read(r#"{"niveau":0}"#)["niveau"], 1);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// symbol.float: default, min, max, step, choices and presets' values are decimals, kept and written
+    /// as f32 bits, shown as decimals.
+    #[test]
+    fn float_settings_are_decimals_down_to_their_bounds() {
+        let dir = scratch("float");
+        let json = |settings: &str| {
+            format!(
+                r#"{{"format":1,"id":"f","name":"f","version":"1.0.0","games":["SUPP01"],"launcher":">=0.5","settings":[{settings}],
+                "patches":[{{"type":"code","modules":{{"main":{{"objects":["code/x.o"]}}}}}}]}}"#
+            )
+        };
+        let size = r#"{"id":"taille","type":"number","label":"Taille","min":0.5,"max":3,"step":0.25,"default":1.5,"symbol":{"module":"main","name":"gSize","float":true}}"#;
+        let bob = r#"{"id":"ressort","type":"choice","label":"Ressort","default":0.5,"choices":[{"value":0,"label":"Non"},{"value":0.5,"label":"Doux"}],"symbol":{"module":"main","name":"gBob","float":true}}"#;
+        let preset = r#"{"id":"style","type":"choice","label":"Style","default":1,"choices":[{"value":0,"label":"Gros","sets":{"taille":2.25,"ressort":0}},{"value":1,"label":"Perso"}]}"#;
+        let path = dir.join("in").join("f.wpmod");
+        package(&path, &[("mod.json", &json(&format!("{size},{bob},{preset}"))), ("code/x.o", "o")]);
+        install(&WPMOD, &path, &dir.join("mods")).unwrap();
+        let read = |values: &[(&str, f32)]| {
+            let saved = Values::from([("f".to_string(), values.iter().map(|(k, v)| (k.to_string(), v.to_bits() as i64)).collect())]);
+            installed(&WPMOD, &dir.join("mods"), &saved).pop().unwrap()
+        };
+        let m = read(&[]);
+        let bits = |x: f32| x.to_bits() as i64;
+        assert_eq!((m.values["taille"], m.values["ressort"], m.values["style"]), (bits(1.5), bits(0.5), 1));
+        let writes = code_mod(&m).writes;
+        assert!(writes.contains(&("main".to_string(), "gSize".to_string(), 0, 1.5f32.to_be_bytes().to_vec())), "{writes:?}");
+        let taille = m.manifest.settings.iter().find(|s| s.id == "taille").unwrap();
+        assert!(taille.allows(bits(2.75)) && taille.allows(bits(0.5)) && taille.allows(bits(3.0)));
+        assert!(!taille.allows(bits(2.8)) && !taille.allows(bits(3.25)) && !taille.allows(bits(0.25)));
+        // the page sees decimals, and gives decimals back
+        let views = serde_json::to_value(setting_views(&m, false)).unwrap();
+        assert_eq!((views[0]["min"].as_f64(), views[0]["max"].as_f64(), views[0]["step"].as_f64(), views[0]["value"].as_f64()), (Some(0.5), Some(3.0), Some(0.25), Some(1.5)));
+        assert_eq!(views[1]["choices"][1]["value"].as_f64(), Some(0.5));
+        assert_eq!(views[2]["choices"][0]["sets"]["taille"].as_f64(), Some(2.25));
+        let page = page_values(&m.manifest.settings, BTreeMap::from([("taille".to_string(), 2.75), ("ressort".to_string(), 0.0)]), false).unwrap();
+        assert_eq!(page["taille"], bits(2.75));
+        assert!(page_values(&m.manifest.settings, BTreeMap::from([("taille".to_string(), 2.8)]), false).is_err());
+        // a preset set to decimals, found back from the values
+        assert_eq!(read(&[("taille", 2.25), ("ressort", 0.0)]).values["style"], 0);
+        let saved = read(&[("taille", 2.75)]);
+        assert!(code_mod(&saved).writes.contains(&("main".to_string(), "gSize".to_string(), 0, 2.75f32.to_be_bytes().to_vec())));
+        // a decimal without float, a float toggle
+        let plain = r#"{"id":"t","type":"number","label":"T","min":0,"max":3,"default":1.5,"symbol":{"module":"main","name":"gT"}}"#;
+        let toggle = r#"{"id":"t","type":"toggle","label":"T","default":1,"symbol":{"module":"main","name":"gT","float":true}}"#;
+        for (settings, why) in [(plain, "entier"), (toggle, "float")] {
+            package(&path, &[("mod.json", &json(settings)), ("code/x.o", "o")]);
+            let e = install(&WPMOD, &path, &dir.join("mods")).err().unwrap();
+            assert!(e.contains(why), "{e}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 

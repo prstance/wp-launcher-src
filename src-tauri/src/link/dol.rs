@@ -41,7 +41,7 @@ pub struct Patch {
     pub original: Option<Vec<u8>>,
 }
 
-// WpContext (wp/mod/context.h): gpr[32], cr, lr, ctr, xer, resume, pad, fpr[32] (doubles)
+// WpContext (wp/mod/mod.h): gpr[32], cr, lr, ctr, xer, resume, pad, fpr[32] (doubles)
 const CTX_GPR: i16 = 0;
 const CTX_CR: i16 = 0x80;
 const CTX_LR: i16 = 0x84;
@@ -54,7 +54,8 @@ pub const CTX_SIZE: i16 = 0x198;
 const CTX_AT: i16 = 8;
 const FRAME: i16 = (CTX_AT + CTX_SIZE + 15) & !15;
 
-mod ppc {
+/// PowerPC instructions (also the resident module's generated code, resident.rs).
+pub(super) mod ppc {
     pub fn d_form(op: u32, rt: u32, ra: u32, d: i16) -> u32 {
         (op << 26) | (rt << 21) | (ra << 16) | (d as u16 as u32)
     }
@@ -67,6 +68,8 @@ mod ppc {
     pub fn lfd(ft: u32, ra: u32, d: i16) -> u32 { d_form(50, ft, ra, d) }
     pub fn addi(rt: u32, ra: u32, d: i16) -> u32 { d_form(14, rt, ra, d) }
     pub fn cmpwi0(ra: u32) -> u32 { d_form(11, 0, ra, 0) }
+    /// lis rt, 0 (its immediate: a R_PPC_ADDR16_HA)
+    pub fn lis(rt: u32) -> u32 { d_form(15, rt, 0, 0) }
     fn spr(spr: u32) -> u32 { ((spr & 31) << 16) | ((spr >> 5) << 11) }
     pub fn mfspr(rt: u32, n: u32) -> u32 { (31 << 26) | (rt << 21) | spr(n) | (339 << 1) }
     pub fn mtspr(n: u32, rs: u32) -> u32 { (31 << 26) | (rs << 21) | spr(n) | (467 << 1) }
@@ -76,6 +79,16 @@ mod ppc {
     pub fn mfcr(rt: u32) -> u32 { (31 << 26) | (rt << 21) | (19 << 1) }
     pub fn mtcr(rs: u32) -> u32 { (31 << 26) | (rs << 21) | (0xFF << 12) | (144 << 1) }
     pub const BCTR: u32 = 0x4E80_0420;
+    pub const BCTRL: u32 = 0x4E80_0421;
+    pub const BLR: u32 = 0x4E80_0020;
+    /// clrlwi. r0, r3, 24: a returned bool tested (cr0)
+    pub const TEST_BOOL: u32 = 0x5460_063F;
+    /// crclr 4*cr1+eq: no float argument for a variadic call
+    pub const CRCLR6: u32 = 0x4CC6_3182;
+    /// b +d (no link)
+    pub fn b_rel(d: i32) -> u32 { 0x4800_0000 | (d as u32 & 0x03FF_FFFC) }
+    /// bne cr0, +d
+    pub fn bne(d: i16) -> u32 { 0x4082_0000 | (d as u16 as u32 & 0xFFFC) }
     pub fn b(from: u32, to: u32, link: bool) -> Option<u32> {
         let d = to.wrapping_sub(from) as i32;
         (-0x200_0000..0x200_0000).contains(&d).then(|| 0x4800_0000 | (d as u32 & 0x03FF_FFFC) | link as u32)
@@ -262,9 +275,22 @@ fn trampoline(start: u32, at: u32, original: u32, before: &[u32], after: &[u32])
 /// may use them (its main.dol part's variables and functions).
 pub type Linked = (Vec<Patch>, Vec<(String, u32)>);
 
-/// Links the mods' main.dol parts at BASE. An injected instruction is given (`expect`, Riivolution checks
-/// it: `original`), so main.dol itself is not needed.
-pub fn link(parts: &[DolPart], main: &MainSymbols) -> Result<Linked, LinkError> {
+/// The word at `address` in a DOL's sections, None outside them.
+pub fn dol_word(dol: &[u8], address: u32) -> Option<u32> {
+    let at = |o: usize| dol.get(o..o + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
+    for i in 0..18 {
+        let (offset, start, size) = (at(4 * i)?, at(0x48 + 4 * i)?, at(0x90 + 4 * i)?);
+        if size > 0 && address >= start && address - start + 4 <= size {
+            return at((offset + address - start) as usize);
+        }
+    }
+    None
+}
+
+/// Links the mods' main.dol parts at BASE. An injected instruction must be its `expect`: checked in
+/// `dol`, the core's main.dol, when there is one (the launcher made it), else left to Riivolution (the
+/// patch's `original`: a patch where it isn't is skipped).
+pub fn link(parts: &[DolPart], main: &MainSymbols, dol: Option<&[u8]>) -> Result<Linked, LinkError> {
     if parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty()) {
         return Ok((vec![], vec![]));
     }
@@ -335,6 +361,18 @@ pub fn link(parts: &[DolPart], main: &MainSymbols) -> Result<Linked, LinkError> 
             let fail = |m: String| LinkError::new(m, &[&part.id]);
             let at = main.get(&inj.symbol).ok_or_else(|| fail(format!("« {} » n'est pas dans main.dol", inj.symbol)))?.0 + inj.offset;
             let found = inj.expect;
+            if let Some(dol) = dol {
+                let place = format!("{}+{:#X}", inj.symbol, inj.offset);
+                match dol_word(dol, at) {
+                    None => return Err(fail(format!("injection {place} : l'adresse {at:#010X} n'est pas dans le code de main.dol"))),
+                    Some(word) if word != found => {
+                        return Err(fail(format!(
+                            "injection {place} : l'instruction attendue (« expect ») est {found:08X}, le main.dol du cœur a {word:08X} à cet endroit (mod fait pour un autre cœur ?)"
+                        )))
+                    }
+                    Some(_) => {}
+                }
+            }
             if resolve(&inj.handler).is_none() {
                 return Err(fail(format!("« {} » est introuvable dans le code du mod", inj.handler)));
             }
@@ -460,7 +498,7 @@ mod tests {
             injects: vec![Inject { symbol: "f".into(), offset: 8, expect: 0x3C80_801E, handler: format!("{id}_h"), after: false }],
             writes: vec![(format!("{id}_data"), 4, vec![1, 2, 3, 4])],
         };
-        let (p, symbols) = link(&[inject("a"), inject("b")], &main).unwrap();
+        let (p, symbols) = link(&[inject("a"), inject("b")], &main, None).unwrap();
         // the low memory, then the site's jump (checked against the instruction expected there)
         assert_eq!(p.len(), 2);
         assert_eq!((p[0].address, p[0].original.as_ref()), (BASE, None));
@@ -470,7 +508,39 @@ mod tests {
         assert_eq!((p[1].address, p[1].original.as_deref()), (0x8000_A3C8, Some(&[0x3C, 0x80, 0x80, 0x1E][..])));
         // one trampoline for both, in the low memory
         assert!((BASE..END).contains(&b_at(0x8000_A3C8, jump)));
-        assert!(link(&[], &main).unwrap().0.is_empty());
+        assert!(link(&[], &main, None).unwrap().0.is_empty());
+    }
+
+    /// A DOL with one text section at 0x8000A3C0: `words`.
+    fn dol(words: &[u32]) -> Vec<u8> {
+        let mut d = vec![0u8; 0x100];
+        d[0..4].copy_from_slice(&0x100u32.to_be_bytes());
+        d[0x48..0x4C].copy_from_slice(&0x8000_A3C0u32.to_be_bytes());
+        d[0x90..0x94].copy_from_slice(&(4 * words.len() as u32).to_be_bytes());
+        d.extend(words.iter().flat_map(|w| w.to_be_bytes()));
+        d
+    }
+
+    #[test]
+    fn checks_the_injected_instruction_in_the_cores_main_dol() {
+        let main = MainSymbols::parse("8000A3C0 1 f\n").unwrap();
+        let part = |expect: u32, offset: u32| DolPart {
+            id: "bighead".into(),
+            objects: vec![handler("h")],
+            injects: vec![Inject { symbol: "f".into(), offset, expect, handler: "h".into(), after: false }],
+            ..Default::default()
+        };
+        let core = dol(&[0x9421_FFF0, 0x7C08_02A6, 0x3C80_801E]);
+        assert_eq!(dol_word(&core, 0x8000_A3C8), Some(0x3C80_801E));
+        assert_eq!(dol_word(&core, 0x8000_A3CC), None);
+        assert!(link(&[part(0x3C80_801E, 8)], &main, Some(&core)).is_ok());
+        let e = link(&[part(0x3C80_801F, 8)], &main, Some(&core)).err().unwrap();
+        assert_eq!(e.mods, ["bighead"]);
+        assert!(e.message.contains("f+0x8") && e.message.contains("3C80801F") && e.message.contains("3C80801E"), "{}", e.message);
+        let e = link(&[part(0x3C80_801E, 0x40)], &main, Some(&core)).err().unwrap();
+        assert!(e.message.contains("pas dans le code de main.dol"), "{}", e.message);
+        // without the core's main.dol: left to Riivolution
+        assert!(link(&[part(0x3C80_801F, 8)], &main, None).is_ok());
     }
 
     /// An object with a function `name` (blr).
@@ -489,8 +559,8 @@ mod tests {
             injects: vec![Inject { symbol: "f".into(), offset: 0, expect, handler: format!("{id}_h"), after: false }],
             ..Default::default()
         };
-        assert!(link(&[part("a", 1), part("b", 2)], &main).is_err());
-        let e = link(&[DolPart { injects: vec![Inject { symbol: "g".into(), ..part("a", 1).injects[0].clone() }], ..part("a", 1) }], &main).err().unwrap();
+        assert!(link(&[part("a", 1), part("b", 2)], &main, None).is_err());
+        let e = link(&[DolPart { injects: vec![Inject { symbol: "g".into(), ..part("a", 1).injects[0].clone() }], ..part("a", 1) }], &main, None).err().unwrap();
         assert!(e.message.contains("n'est pas dans main.dol"), "{}", e.message);
     }
 }

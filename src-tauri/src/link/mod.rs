@@ -1,6 +1,8 @@
 //! PartyLauncher's linker: it puts the mods' code into the game (wp-core docs/modding.md), on top of the
 //! mods' core: the game rebuilt from its decompilation (wp-srccore docs/core.md), whose files are made
-//! from the player's disc (corepkg.rs) and go in place of the disc's.
+//! from the player's disc (corepkg.rs) and go in place of the disc's. A code patch's modules: "main"
+//! (main.dol: low memory and injections, dol.rs), "resident" (/wp/wpmods.rel, handlers of main.dol's
+//! hook lists, resident.rs), a module of the core (mr001, inst, menu: module.rs) or a new REL.
 
 pub mod corepkg;
 pub mod dol;
@@ -8,6 +10,7 @@ pub mod elf;
 pub mod minigames;
 pub mod module;
 pub mod rel;
+pub mod resident;
 pub mod xmsg;
 
 /// Why the mods could not be linked, and which mods are concerned.
@@ -39,7 +42,7 @@ pub struct CodeModule {
     /// main.dol: injections.
     #[serde(default)]
     pub inject: Vec<InjectSpec>,
-    /// Core modules: hook -> handler.
+    /// Core modules and "resident" (main.dol's lists, main.json): hook -> handler.
     #[serde(default)]
     pub hooks: BTreeMap<String, String>,
     /// Core modules: function of the game -> replacement.
@@ -184,7 +187,9 @@ pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, ba
         return Ok(None);
     }
     let kept = |disc: &str| replaced.iter().any(|r| r.eq_ignore_ascii_case(disc) || r.eq_ignore_ascii_case(&format!("/{disc}")));
-    let (built, made, warnings) = build(core, Some(disc), &kept, mods)?;
+    // the core's main.dol, where the injections' instructions are checked (unless a mod replaces it whole)
+    let dol = base.iter().find(|(name, _)| name.eq_ignore_ascii_case("main.dol")).filter(|_| !kept("main.dol")).and_then(|(_, file)| std::fs::read(file).ok());
+    let (built, made, warnings) = build(core, Some(disc), dol.as_deref(), &kept, mods)?;
     let io = |e: std::io::Error| LinkError::new(format!("{} : {e}", out.display()), &[]);
     let _ = std::fs::remove_dir_all(out);
     // the core's files first: the linked modules and the mods' new ones, after them, win
@@ -218,15 +223,21 @@ pub fn check_code(core: &Path, mods: &[CodeMod]) -> Result<(), LinkError> {
     if mods.iter().all(|m| !m.has_code()) {
         return Ok(());
     }
-    build(core, None, &|_| false, mods).map(|_| ())
+    build(core, None, None, &|_| false, mods).map(|_| ())
 }
 
 /// The XML's patch lines, the files they name (disc path, contents) and the warnings. Without `disc`, no
-/// files: only the modules the mods' code goes into are linked, and no texts and no sounds. `kept`: a disc
-/// file a mod replaces whole.
+/// files: only the modules the mods' code goes into are linked, and no texts and no sounds. `dol`: the
+/// core's main.dol (the injections are checked against it). `kept`: a disc file a mod replaces whole.
 type Built = (Vec<String>, Vec<(String, Vec<u8>)>, Vec<String>);
 
-fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, kept: &dyn Fn(&str) -> bool, mods: &[CodeMod]) -> Result<Built, LinkError> {
+/// main.json of the core: every hook, with its list in main.dol.
+fn main_hooks(core: &Path) -> Result<Vec<module::HookDef>, LinkError> {
+    let text = std::fs::read_to_string(core.join("main.json")).map_err(|_| LinkError::new("ce cœur des mods n'a pas main.json (les hooks de main.dol) : launcher à mettre à jour".into(), &[]))?;
+    serde_json::from_str::<resident::MainInfo>(&text).map(|i| i.hooks).map_err(|e| LinkError::new(format!("main.json : {e}"), &[]))
+}
+
+fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, dol: Option<&[u8]>, kept: &dyn Fn(&str) -> bool, mods: &[CodeMod]) -> Result<Built, LinkError> {
     let all: Vec<&str> = mods.iter().map(|m| m.id).collect();
     let io = |e: std::io::Error| LinkError::new(format!("cœur des mods : {e}"), &[]);
     let mut main = rel::MainSymbols::parse(&std::fs::read_to_string(core.join("main.sym")).map_err(io)?).map_err(|e| LinkError::new(e, &[]))?;
@@ -236,10 +247,13 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
     // the mods' minigames: the core reads them from /wp/minigames.bin
     let added: minigames::Added = mods.iter().filter(|m| !m.minigames.is_empty()).map(|m| (m.id, &m.minigames[..])).collect();
     minigames::check(&added)?;
+    // (made last: a sound group named by its label is found in the sound archive the mods patch)
+    let mut registry = None;
     if !added.is_empty() && disc.is_some() {
         let inside = minigames::FILE.trim_start_matches('/');
         lines.push(format!(r#"<file disc="{}" external="{inside}" create="true"/>"#, minigames::FILE));
-        made.push((minigames::FILE.to_string(), minigames::file(&added)));
+        registry = Some(made.len());
+        made.push((minigames::FILE.to_string(), Vec::new()));
     }
 
     // main.dol
@@ -247,6 +261,12 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
     for m in mods {
         let Some(part) = m.modules.get("main") else { continue };
         let fail = |msg: String| LinkError::new(msg, &[m.id]);
+        if !part.hooks.is_empty() {
+            return Err(fail(format!("les « hooks » du code de main.dol vont dans le module « {} » (chargé en {}), pas dans « main »", resident::MODULE, resident::FILE)));
+        }
+        if !part.replace.is_empty() || part.save.is_some() {
+            return Err(fail("« replace » et « save » ne sont permis que dans un module du cœur (mr001, inst, menu), pas dans « main »".into()));
+        }
         let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
         let mut injects = Vec::new();
         for i in &part.inject {
@@ -257,7 +277,7 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
         let writes = m.writes.iter().filter(|w| w.0 == "main").map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
         parts.push(dol::DolPart { id: m.id.to_string(), objects, injects, writes, ..Default::default() });
     }
-    let (patches, symbols) = dol::link(&parts, &main)?;
+    let (patches, symbols) = dol::link(&parts, &main, dol)?;
     for p in patches {
         match &p.original {
             Some(o) => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}" original="{}"/>"#, p.address, hexs(&p.value), hexs(o))),
@@ -267,6 +287,42 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
     // the RELs may use the mods' main.dol code (a REL part that drives its main.dol part)
     for (name, address) in &symbols {
         main.add(name, *address);
+    }
+
+    // the resident code: /wp/wpmods.rel, whose prolog adds its handlers to main.dol's lists
+    let mut hooks_of_main = None;
+    let mut resident_users: Vec<(String, String)> = Vec::new();
+    let residents: Vec<&CodeMod> = mods.iter().filter(|m| m.modules.contains_key(resident::MODULE)).collect();
+    if !residents.is_empty() {
+        let mut parts = Vec::new();
+        for m in &residents {
+            let part = &m.modules[resident::MODULE];
+            let fail = |msg: String| LinkError::new(msg, &[m.id]);
+            if !part.inject.is_empty() {
+                return Err(fail(format!("les injections (« inject ») vont dans le module « main », pas dans « {} »", resident::MODULE)));
+            }
+            if part.save.is_some() {
+                return Err(fail(format!("« save » n'est permis que dans mr001, pas dans « {} »", resident::MODULE)));
+            }
+            let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
+            let writes = m.writes.iter().filter(|w| w.0 == resident::MODULE).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
+            parts.push(module::ModPart {
+                id: m.id.to_string(),
+                objects,
+                hooks: part.hooks.iter().map(|(h, f)| (h.clone(), f.clone())).collect(),
+                replaces: part.replace.iter().map(|(t, w)| (t.clone(), w.clone())).collect(),
+                writes,
+            });
+        }
+        let defs = main_hooks(core).map_err(|e| LinkError::new(e.message, &residents.iter().map(|m| m.id).collect::<Vec<_>>()))?;
+        let linked = resident::link(&parts, &defs, &main)?;
+        resident_users = linked.users;
+        hooks_of_main = Some(defs);
+        if disc.is_some() {
+            let inside = resident::FILE.trim_start_matches('/');
+            lines.push(format!(r#"<file disc="{}" external="{inside}" create="true"/>"#, resident::FILE));
+            made.push((resident::FILE.to_string(), linked.rel));
+        }
     }
 
     // the core's modules: always shipped (the disc's would not fit the core's main.dol), but those a mod
@@ -310,6 +366,23 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
                 writes,
             });
         }
+        // a hook this module gets its own list of (a part names it) while resident handlers are on
+        // main.dol's: the module's list calls main.dol's (a chain), where the first resident mod comes
+        let at = |id: &str| mods.iter().position(|m| m.id == id).unwrap_or(usize::MAX);
+        let mut order: Vec<usize> = users.iter().map(|m| at(m.id)).collect();
+        let mut chained: Vec<&str> = Vec::new();
+        for (hook, first) in &resident_users {
+            if chained.contains(&hook.as_str()) || !users.iter().any(|m| m.modules[&module].hooks.contains_key(hook)) {
+                continue;
+            }
+            chained.push(hook);
+            let def = hooks_of_main.as_ref().and_then(|d| d.iter().find(|d| &d.name == hook)).expect("resident hooks come from main.json");
+            let object = resident::chain(def, &main).map_err(|e| LinkError::new(e, &[first.as_str()]))?;
+            let index = at(first);
+            let position = order.iter().position(|o| *o > index).unwrap_or(order.len());
+            order.insert(position, index);
+            parts.insert(position, module::ModPart { id: first.clone(), objects: vec![object], hooks: vec![(hook.clone(), resident::chain_symbol(hook))], ..Default::default() });
+        }
         if room > 0 && plf.global("gWpSaveLayout").is_some() {
             parts.push(module::ModPart { id: "cœur".into(), writes: vec![("gWpSaveLayout".into(), 0, layout.to_be_bytes().to_vec())], ..Default::default() });
         }
@@ -329,7 +402,7 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
     // the mods' new modules (their minigames): each one of one mod, made from its objects alone
     let mut new: Vec<(&String, &CodeMod)> = Vec::new();
     for m in mods {
-        for name in m.modules.keys().filter(|n| *n != "main" && !cores.contains(n)) {
+        for name in m.modules.keys().filter(|n| *n != "main" && *n != resident::MODULE && !cores.contains(n)) {
             if let Some((_, other)) = new.iter().find(|(n, _)| *n == name) {
                 return Err(LinkError::new(format!("deux mods ont un module « {name} »"), &[other.id, m.id]));
             }
@@ -396,6 +469,22 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, ke
         made.push((name, file.bytes().to_vec()));
     }
     let warnings = sounds(disc, mods, &mut lines, &mut made)?;
+    if let Some(at) = registry {
+        // a sound group by its label: in the archive as the mods' sound patches leave it
+        let mut archive = None;
+        let mut group = |label: &str| -> Result<Option<i32>, String> {
+            if archive.is_none() {
+                let bytes = match made.iter().find(|(name, _)| name.eq_ignore_ascii_case(minigames::SOUND_ARCHIVE)) {
+                    Some((_, bytes)) => bytes.clone(),
+                    None => disc(minigames::SOUND_ARCHIVE)?,
+                };
+                archive = Some(crate::sound::rsar::Archive::parse(bytes).map_err(|e| format!("{} : {e}", minigames::SOUND_ARCHIVE))?);
+            }
+            Ok(archive.as_ref().unwrap().group_id(label).map(|g| g as i32))
+        };
+        let bytes = minigames::file(&added, &mut group)?;
+        made[at].1 = bytes;
+    }
     Ok((lines, made, warnings))
 }
 
@@ -464,7 +553,7 @@ mod tests {
         for (d, f) in &base {
             std::fs::write(f, d).unwrap();
         }
-        let spec = minigames::Spec { id: 305, category: "1v3".into(), kind: None, pool: true, sounds_of: 406, rules: None, controls: Some(110), controls_team: Some(2), free_play: true };
+        let spec: minigames::Spec = serde_json::from_str(r#"{"id": 305, "category": "1v3", "sounds_of": 406, "controls": 110, "controls_team": 2}"#).unwrap();
         let winter = CodeMod {
             id: "winter",
             dir: &dir,
@@ -499,6 +588,36 @@ mod tests {
         // no code, no texts, no sounds: nothing
         assert!(link_game(&core, &disc, &base, &[], &[], &out).unwrap().is_none());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn code(id: &'static str, dir: &'static Path, module: &str, part: &str) -> CodeMod<'static> {
+        CodeMod {
+            id,
+            dir,
+            modules: BTreeMap::from([(module.to_string(), serde_json::from_str(part).unwrap())]),
+            writes: Vec::new(),
+            messages: BTreeMap::new(),
+            messages_with: BTreeMap::new(),
+            minigames: Vec::new(),
+            sounds: Vec::new(),
+        }
+    }
+
+    /// main.dol's hooks are the resident module's; it needs the core's main.json.
+    #[test]
+    fn main_dols_hooks_go_in_the_resident_module() {
+        let core = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core");
+        let dir = Path::new("/nowhere");
+        let e = check_code(&core, &[code("a", dir, "main", r#"{"objects": [], "hooks": {"Scene_loaded": "A"}}"#)]).err().unwrap();
+        assert!(e.message.contains("« resident »") && e.mods == ["a"], "{}", e.message);
+        let e = check_code(&core, &[code("a", dir, "main", r#"{"objects": [], "replace": {"f": "g"}}"#)]).err().unwrap();
+        assert!(e.message.contains("replace"), "{}", e.message);
+        let e = check_code(&core, &[code("a", dir, "resident", r#"{"objects": [], "inject": [{"at": "f", "expect": "0", "call": "h"}]}"#)]).err().unwrap();
+        assert!(e.message.contains("« main »"), "{}", e.message);
+        if !core.join("main.json").exists() {
+            let e = check_code(&core, &[code("a", dir, "resident", r#"{"objects": [], "hooks": {"Scene_loaded": "A"}}"#)]).err().unwrap();
+            assert!(e.message.contains("main.json"), "{}", e.message);
+        }
     }
 
     #[test]

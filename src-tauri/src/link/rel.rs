@@ -81,6 +81,10 @@ fn resolve(obj: &Object, module_id: u32, main: &MainSymbols) -> Result<Vec<RelRe
             let target = &obj.symbols[r.symbol];
             let (module, target_section, value) = if target.is_defined() {
                 (module_id, target.section as u8, target.value)
+            } else if target.section == elf::SHN_ABS {
+                // an address of main.dol given as is (resident.rs: main.dol's own list of a hook that
+                // the module has a list of too)
+                (0, 0, target.value)
             } else if let Some((address, section)) = main.get(&target.name) {
                 (0, section as u8, address)
             } else {

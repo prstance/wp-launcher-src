@@ -16,6 +16,9 @@ pub struct HookDef {
     pub exclusive: bool,
     #[serde(default)]
     pub doc: String,
+    /// main.json: the modules that call it ("main": main.dol itself).
+    #[serde(default)]
+    pub modules: Vec<String>,
 }
 
 /// What one mod puts into one module.
@@ -122,7 +125,7 @@ impl Linker {
                         self.owners.insert(sym.name.clone(), owner.to_string());
                     } else if new.bind == elf::STB_GLOBAL && old.bind == elf::STB_GLOBAL {
                         return Err(LinkError::new(
-                            format!("« {} » est défini deux fois ({first} et {owner}) : utiliser WP_REPLACE pour remplacer une fonction du jeu", sym.name),
+                            format!("« {} » est défini deux fois ({first} et {owner}) : pour remplacer une fonction du jeu, la nommer dans la liste « replace » du module (mod.json)", sym.name),
                             &[owner, first.as_str()],
                         ));
                     }
@@ -164,6 +167,40 @@ impl Linker {
                 r.symbol = remap[r.symbol];
             }
         }
+    }
+
+    /// Moves the variable `name` of .bss to the end of .data (zeros: a value can then be written into
+    /// it). Its references follow the symbol; one through the section itself (a static's, by its
+    /// section and an offset) could not, and is refused. Its room in .bss stays, unused.
+    fn to_data(&mut self, name: &str) -> Result<(usize, u32), String> {
+        let index = self.out.global(name).ok_or_else(|| format!("« {name} » est introuvable dans le code du mod"))?;
+        let (bss, from, size) = {
+            let s = &self.out.symbols[index];
+            (s.section as usize, s.value, s.size)
+        };
+        let refuse = || format!("« {name} » est en .bss et lu autrement que par son nom : l'initialiser avec une valeur non nulle (« = 1 »)");
+        if size == 0 {
+            return Err(refuse());
+        }
+        for section in &self.out.sections {
+            for r in &section.relocs {
+                let t = &self.out.symbols[r.symbol];
+                let place = t.value as i64 + r.addend as i64;
+                if r.symbol != index && t.is_defined() && t.section as usize == bss && (from as i64..(from + size) as i64).contains(&place) {
+                    return Err(refuse());
+                }
+            }
+        }
+        let data = self.out.section_index(".data").ok_or_else(refuse)?;
+        let d = &mut self.out.sections[data];
+        let at = (d.size + 7) & !7;
+        d.data.resize((at + size) as usize, 0);
+        d.size = at + size;
+        d.align = d.align.max(8);
+        let s = &mut self.out.symbols[index];
+        s.section = data as u16;
+        s.value = at;
+        Ok((data, at))
     }
 
     fn symbol_at(&self, name: &str) -> Option<(usize, u32)> {
@@ -296,18 +333,60 @@ pub fn link(core: &Object, hooks: &[HookDef], mods: &[ModPart], main: &MainSymbo
         }
     }
 
-    // values written into the mods' data
+    // values written into the mods' data (a variable of .bss moves to .data first)
     for part in mods {
         for (name, offset, bytes) in &part.writes {
             let fail = |m: String| LinkError::new(m, &[&part.id]);
-            let (section, at) = linker.symbol_at(name).ok_or_else(|| fail(format!("« {name} » est introuvable dans le code du mod")))?;
+            let (mut section, mut at) = linker.symbol_at(name).ok_or_else(|| fail(format!("« {name} » est introuvable dans le code du mod")))?;
+            if linker.out.sections[section].kind == elf::SHT_NOBITS {
+                (section, at) = linker.to_data(name).map_err(fail)?;
+            }
             let s = &mut linker.out.sections[section];
             let at = (at + offset) as usize;
-            if s.kind == elf::SHT_NOBITS || at + bytes.len() > s.data.len() {
-                return Err(fail(format!("« {name} » doit être une variable initialisée (pas en .bss)")));
+            if at + bytes.len() > s.data.len() {
+                return Err(fail(format!("« {name} » est trop petite pour la valeur écrite à {offset}")));
             }
             s.data[at..at + bytes.len()].copy_from_slice(bytes);
         }
     }
     Ok(linker.out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An object with `gZero` (4 bytes of .bss) read by `f` through its name, and `sStatic` (4 bytes after
+    /// it) through the section.
+    fn with_bss() -> Object {
+        let mut obj = super::super::resident::tests::function("f", &[]);
+        obj.sections.push(Section { name: ".bss".into(), kind: elf::SHT_NOBITS, flags: elf::SHF_ALLOC | 1, align: 4, data: vec![], size: 8, relocs: vec![] });
+        let bss = obj.sections.len() as u16 - 1;
+        obj.symbols.push(Symbol { name: ".bss".into(), value: 0, size: 0, bind: elf::STB_LOCAL, kind: 3, section: bss });
+        let section = obj.symbols.len() - 1;
+        obj.symbols.push(Symbol { name: "gZero".into(), value: 0, size: 4, bind: elf::STB_GLOBAL, kind: 1, section: bss });
+        let zero = obj.symbols.len() - 1;
+        obj.symbols.push(Symbol { name: "gAlso".into(), value: 4, size: 4, bind: elf::STB_GLOBAL, kind: 1, section: bss });
+        obj.sections[1].relocs.push(Reloc { offset: 2, kind: elf::R_PPC_ADDR16_HA, symbol: zero, addend: 0 });
+        obj.sections[1].relocs.push(Reloc { offset: 2, kind: elf::R_PPC_ADDR16_LO, symbol: section, addend: 4 });
+        obj
+    }
+
+    /// A setting's variable left at 0 (in .bss) moves to .data, where its value is written.
+    #[test]
+    fn writes_a_bss_variable_from_data() {
+        let main = MainSymbols::default();
+        let part = |name: &str| ModPart { id: "m".into(), objects: vec![with_bss()], writes: vec![(name.into(), 0, vec![0, 0, 0, 14])], ..Default::default() };
+        let out = link(&empty_module(), &[], &[part("gZero")], &main).unwrap();
+        let s = &out.symbols[out.global("gZero").unwrap()];
+        let data = &out.sections[s.section as usize];
+        assert_eq!(data.name, ".data");
+        assert_eq!(&data.data[s.value as usize..s.value as usize + 4], &[0, 0, 0, 14]);
+        // its reference follows it
+        let text = out.section_index(".text").unwrap();
+        assert!(out.sections[text].relocs.iter().any(|r| r.symbol == out.global("gZero").unwrap()));
+        // a variable also read through its section stays where it is: refused
+        let e = link(&empty_module(), &[], &[part("gAlso")], &main).err().unwrap();
+        assert!(e.message.contains("valeur non nulle"), "{}", e.message);
+    }
 }

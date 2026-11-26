@@ -52,7 +52,7 @@
   {:else}
     <span role="group" aria-label={local(s.label)} style="flex-shrink: 0; display: flex; align-items: center; gap: 4px; height: 38px; padding: 0 4px; border-radius: 12px; background: var(--surface);">
       <button type="button" class="step" aria-label={t('Moins')} disabled={busy || s.value <= (s.min ?? -Infinity)} onclick={() => step(-1)}>−</button>
-      <input class="number" type="text" inputmode="numeric" aria-label={local(s.label)} disabled={busy} value={s.value} onchange={(e) => typed(e.currentTarget)} onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} style="width: calc({digits}ch + 16px);" />
+      <input class="number" type="text" inputmode={Number.isInteger(s.step ?? 1) && Number.isInteger(s.min ?? 0) ? 'numeric' : 'decimal'} aria-label={local(s.label)} disabled={busy} value={s.value} onchange={(e) => typed(e.currentTarget)} onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} style="width: calc({digits}ch + 16px);" />
       <button type="button" class="step" aria-label={t('Plus')} disabled={busy || s.value >= (s.max ?? Infinity)} onclick={() => step(1)}>+</button>
     </span>
   {/if}

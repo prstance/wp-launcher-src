@@ -8,10 +8,13 @@ pub const SHT_NOBITS: u32 = 8;
 pub const SHF_ALLOC: u32 = 2;
 pub const SHF_EXECINSTR: u32 = 4;
 pub const SHN_UNDEF: u16 = 0;
+pub const SHN_ABS: u16 = 0xFFF1;
 
 pub const STB_LOCAL: u8 = 0;
 pub const STB_GLOBAL: u8 = 1;
 pub const STB_WEAK: u8 = 2;
+
+pub const STT_FUNC: u8 = 2;
 
 pub const R_PPC_ADDR32: u8 = 1;
 #[allow(dead_code)] // (the linker refuses it)

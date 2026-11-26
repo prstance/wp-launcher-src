@@ -7,7 +7,7 @@
 //! applied to its message files, and the "sound" patches to its sound archives.
 //!
 //! Writes <out dir>/linked.xml (Riivolution: section "PartyLauncher", option "Code") and its files
-//! (main.dol and rel/<name>.rel.lz of the core, rel/<module>.rel.lz linked, wp/minigames.bin,
+//! (main.dol and rel/<name>.rel.lz of the core, rel/<module>.rel.lz linked, wp/wpmods.rel, wp/minigames.bin,
 //! locale/<language>/mess.bin, sound/wp_sound.brsar…); prints the sound warnings. A core file that a mod
 //! replaces whole (its "files" patches, the <file disc=…> of its Riivolution XMLs) is left to it, as the
 //! launcher does.
@@ -60,9 +60,9 @@ fn main() {
     for spec in &args[2..] {
         let mut it = spec.split(',');
         let dir = PathBuf::from(it.next().unwrap());
-        let values: BTreeMap<String, i64> = it.map(|kv| {
+        let values: BTreeMap<String, String> = it.map(|kv| {
             let (k, v) = kv.split_once('=').unwrap();
-            (k.to_string(), if let Some(h) = v.strip_prefix("0x") { i64::from_str_radix(h, 16).unwrap() } else { v.parse().unwrap() })
+            (k.to_string(), v.to_string())
         }).collect();
         let m: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("mod.json")).or_else(|_| std::fs::read_to_string(dir.join("version.json"))).unwrap()).unwrap();
         dirs.push((dir, values));
@@ -78,8 +78,17 @@ fn main() {
         let mut writes = Vec::new();
         for s in m["settings"].as_array().into_iter().flatten() {
             let Some(sym) = s.get("symbol") else { continue };
-            let v = values.get(s["id"].as_str().unwrap()).copied().unwrap_or(s["default"].as_i64().unwrap());
-            let size = sym["size"].as_u64().unwrap() as usize;
+            // (symbol.float: a decimal, written as its f32 bits)
+            let float = sym.get("float").and_then(|f| f.as_bool()).unwrap_or(false);
+            let number = |v: &str| if float {
+                (v.parse::<f64>().unwrap() as f32).to_bits() as i64
+            } else if let Some(h) = v.strip_prefix("0x") {
+                i64::from_str_radix(h, 16).unwrap()
+            } else {
+                v.parse().unwrap()
+            };
+            let v = values.get(s["id"].as_str().unwrap()).map(|v| number(v)).unwrap_or_else(|| number(&s.get("default").map_or("0".into(), |d| d.to_string())));
+            let size = sym.get("size").and_then(|z| z.as_u64()).unwrap_or(4) as usize;
             let bytes = v.to_be_bytes()[8 - size..].to_vec();
             writes.push((sym["module"].as_str().unwrap().to_string(), sym["name"].as_str().unwrap().to_string(), sym.get("offset").and_then(|o| o.as_u64()).unwrap_or(0) as u32, bytes));
         }

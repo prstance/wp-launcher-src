@@ -325,11 +325,48 @@ place de ceux du disque (`<file disc="main.dol">`, `/rel/<nom>.rel.lz`, liés en
 toujours mr001, inst et menu reliés depuis leur `.plf` (ceux du disque sauteraient à de mauvaises adresses dans le
 main.dol du cœur ; sans mod, chacun est le REL du build du cœur à l'octet près). Un fichier du cœur qu'un mod remplace
 en entier (patch `files`, `<file>` de son XML) reste celui du mod, comme celui du disque ; s'il est relié avec le code
-d'un autre mod, c'est l'incompatibilité habituelle. Les injections et objets `main` des mods restent des patchs mémoire,
-appliqués sur le main.dol du cœur.
+d'un autre mod, c'est l'incompatibilité habituelle.
+
+Un patch `code` donne ses objets par module (`"modules": { "<module>": { "objects": […], … } }`) :
+
+| Module | Ce qu'il peut avoir | Ce que le launcher en fait |
+|---|---|---|
+| `main` | `objects`, `inject` | relié à une adresse fixe de la mémoire basse libre (0x80001800–0x80003000), atteint par les injections ; patchs mémoire sur le main.dol du cœur (`link/dol.rs`) |
+| `resident` | `objects`, `hooks` (ceux de `main.json`) | relié avec ceux des autres mods dans `/wp/wpmods.rel` (`link/resident.rs`), que le cœur charge au démarrage |
+| `mr001`, `inst`, `menu` | `objects`, `hooks`, `replace`, `save` (mr001) | ajouté au `.plf` du cœur, puis le REL (`link/module.rs`) |
+| un autre nom (`mg444`) | `objects` | un nouveau REL, `/rel/<nom>.rel.lz` |
+
+- **Injections** : le launcher fait le main.dol du cœur, il y lit l'instruction à `at` + `offset` ; si ce n'est pas
+  `expect`, le jeu ne se lance pas (« injection f+0x120 : l'instruction attendue (« expect ») est …, le main.dol du
+  cœur a … »), au lieu d'un patch que Riivolution sauterait sans rien dire. Le patch garde son `original` (un main.dol
+  remplacé en entier par un mod n'est pas vérifié, ni la vérification de compatibilité sans le main.dol fait).
+- **Code résident** (`"resident"`) : les hooks de `hooks_main.h` et `hooks_common.h` (et tous ceux de `main.json`)
+  ont une liste dans main.dol (`wph_<nom>`, 8 places), que tous les modules qui appellent le hook lisent. Le launcher
+  relie le code `resident` de tous les mods en un seul module relogeable, `/wp/wpmods.rel` (créé, non compressé),
+  module 0xF000 : `ModCode::load` du cœur le charge en MEM2 à la fin de `GameData::initialize`, le lie contre main.dol
+  et appelle son prologue, sans jamais le décharger. Ce prologue, fait par le launcher, appelle les constructeurs
+  globaux des mods, puis pour chaque mod dans l'ordre de chargement son `_prolog` s'il en a un et
+  `wpAddHandler(wph_<hook>, gestionnaire)` pour chacun de ses hooks ; une liste pleine est dite par `OSReport`
+  (`[wpmods] …`). Vérifié au moment de relier : le hook existe dans `main.json`, le gestionnaire est une fonction du
+  mod, un hook exclusif n'a qu'un mod, 8 gestionnaires résidents au plus par liste (ceux qu'un module ajoute lui-même
+  avec `WP_ADD` ne peuvent pas se compter). MEM2 est trop loin de main.dol pour un `bl` : chaque appel vers main.dol
+  passe par un relais du module (`lis`/`addi r12`, `mtctr`, `bctr`). Le code résident peut utiliser le code `main`
+  du mod (ses symboles), pas l'inverse ; `inject`, `replace` et `save` n'y sont pas permis, et les `hooks` d'un
+  module `main` sont refusés : ils vont dans `resident`.
+- **Un hook dans un module et en résident** : un module du cœur (mr001…) a sa propre liste d'un hook dès qu'un mod
+  le nomme dans sa partie, et ne lit plus celle de main.dol. Quand des gestionnaires résidents sont aussi sur ce
+  hook, le launcher met dans la liste du module un relais (`wp_chain_<hook>`) qui appelle la liste de main.dol avec
+  les mêmes arguments (r3–r10, f1–f8 ; un hook `bool` s'arrête au premier `true`), à la place du premier mod résident
+  dans l'ordre de chargement.
+- `main.json` (`tools/core/export.py`) : les hooks de main.dol. Un cœur sans ce fichier refuse le code résident.
 
 Les mini-jeux des mods (`minigames`) vont dans `/wp/minigames.bin` (`link/minigames.rs`, créé par `linked.xml`), que
-`GameData` du cœur lit au démarrage : plus de table de main.dol à déplacer, plus de limite. Un mod fait pour l'ancien
+`GameData` du cœur lit au démarrage : plus de table de main.dol à déplacer, plus de limite. Un mini-jeu a soit
+`sounds_of` (un mini-jeu du jeu dont il charge les sons), soit `sound_group` (son groupe dans `wp_sound.brsar` : un
+numéro, ou le `label` d'un groupe qu'un patch `sound` ajoute, cherché une fois les patchs de sons appliqués), qui passe
+devant ; `pair` (facultatif) est le mini-jeu joué avec lui (`mPair`, un duel jumeau), du jeu ou d'un mod. 103 et 417
+sont refusés sauf avec `"replace_disc_rel": true` : le disque a `/rel/mg103.rel` et `/rel/mg417.rel` (sans entrée
+dans la table), que le REL du mod remplacerait. Un mod fait pour l'ancien
 cœur (patch `code` et `"launcher"` en dessous de `>=0.5`) est refusé : il faut sa nouvelle version. Un paquet ne se lie
 qu'à un cœur qui a ses hooks et ses symboles : changer de cœur demande de refaire les paquets.
 
@@ -413,6 +450,14 @@ enregistrés dans les paramètres du launcher et s'appliquent au lancement suiva
 - `memory` : la valeur est écrite en big-endian sur `size` octets (1, 2 ou 4) à `offset`, avant le
   démarrage du jeu. C'est au code du mod (dans son `main.dol`) de la lire. Le launcher l'écrit par un XML
   Riivolution qu'il génère (`mods/.settings-<id>.xml`).
+- `symbol` (`{"module", "name", "size", "offset"}`) : la valeur est écrite dans la variable `name` du code du paquet
+  dans `module` (`main`, `resident`, `mr001`, un nouveau REL…), au moment de relier. Une variable laissée à 0 (en
+  `.bss`) est déplacée en `.data` pour y écrire la valeur ; seule une variable lue autrement que par son nom (par sa
+  section, comme une `static` voisine) est refusée, avec le conseil de l'initialiser à une valeur non nulle.
+- `"float": true` dans `symbol` (4 octets, un `choice` ou un `number`) : `default`, `min`, `max`, `step`, les `value`
+  des `choices` et les valeurs des `sets` qui le règlent sont des décimaux ; la fiche les montre ainsi, le launcher
+  garde et écrit les bits du `f32`. Sans `float`, un décimal est refusé. Un paquet du `wpmod_build.py` d'avant (qui
+  retirait `float` et convertissait `default` et les `value`) donne des entiers : il marche comme avant.
 - Une valeur enregistrée que le paquet ne permet plus (après une mise à jour) revient à `default`.
 - Un préréglage est un `choice` dont les choix règlent d'autres réglages d'un coup, sans option
   Riivolution ni `memory` :
