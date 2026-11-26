@@ -70,7 +70,8 @@ pub struct Manifest {
     #[serde(default)]
     settings: Vec<Setting>,
     /// The names of the minigames it adds or replaces, by id ("444"): minigames.rs.
-    #[serde(default)]
+    // (the packages write it snake_case, as the builder does: "minigame_names")
+    #[serde(default, alias = "minigame_names")]
     pub minigame_names: BTreeMap<String, Text>,
     /// Mod id -> versions: "*" or ">=1.2".
     #[serde(default)]
@@ -85,7 +86,7 @@ pub struct Manifest {
     pub messages: BTreeMap<String, BTreeMap<String, String>>,
     /// Its texts when another mod is also active: that mod's id -> language -> key -> text. They win
     /// over the other mods' for those keys ("the volcano" of a mod is "the crevasse" with this one).
-    #[serde(default)]
+    #[serde(default, alias = "messages_with")]
     pub messages_with: BTreeMap<String, BTreeMap<String, BTreeMap<String, String>>>,
     /// The minigames it adds (link/minigames.rs): main.dol's minigame table, the rules screens, Free Play.
     #[serde(default)]
@@ -1735,6 +1736,14 @@ mod tests {
             r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.2.0","games":["SUPP01"],{extra}
             "patches":[{{"type":"riivolution","xml":"riivolution/m.xml","options":[{{"section":"S","option":"O","choice":1}}]}}]}}"#
         )
+    }
+
+    #[test]
+    fn reads_the_snake_case_keys_of_the_packages() {
+        let text = manifest("winter", r#""minigame_names":{"444":"Glissade"},"messages_with":{"lava":{"fr_EU":{"m001_070":"la crevasse"}}},"#);
+        let m: Manifest = serde_json::from_str(&text).unwrap();
+        assert_eq!(m.minigame_names.len(), 1);
+        assert_eq!(m.messages_with["lava"]["fr_EU"]["m001_070"], "la crevasse");
     }
 
     fn xml(body: &str) -> String {
