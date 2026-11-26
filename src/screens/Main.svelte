@@ -33,9 +33,9 @@
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
 
   <div aria-hidden="true" style="position: absolute; inset: 0; pointer-events: none;">
-    <div style="position: absolute; left: 640px; top: -220px; width: 640px; height: 640px; border-radius: 999px; border: 64px solid var(--tint); box-sizing: border-box;"></div>
-    <div style="position: absolute; left: 1010px; top: 330px; width: 420px; height: 420px; border-radius: 999px; border: 44px solid var(--tint); box-sizing: border-box;"></div>
-    <div style="position: absolute; left: 520px; top: 400px; width: 120px; height: 120px; border-radius: 999px; background: var(--tint);"></div>
+    <div style="position: absolute; left: 640px; top: -220px; width: 640px; height: 640px; border-radius: 999px; border: 64px solid var(--decor); box-sizing: border-box;"></div>
+    <div style="position: absolute; left: 1010px; top: 330px; width: 420px; height: 420px; border-radius: 999px; border: 44px solid var(--decor); box-sizing: border-box;"></div>
+    <div style="position: absolute; left: 520px; top: 400px; width: 120px; height: 120px; border-radius: 999px; background: var(--decor);"></div>
     <Decor items={theme.home} />
   </div>
 
@@ -47,7 +47,7 @@
     <header data-tauri-drag-region style="height: 56px; display: flex; align-items: center; justify-content: space-between;">
       <span></span>
       <div style="display: flex; align-items: center; gap: 22px;">
-        <a href="#/Miis" title={t('Mes Mii')} style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px 0 4px; border-radius: 999px; background: #ffffff; text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
+        <a href="#/Miis" title={t('Mes Mii')} style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px 0 4px; border-radius: 999px; background: var(--card); text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
           <span aria-hidden="true" style="width: 34px; height: 34px; border-radius: 999px; background: var(--surface-soft); display: flex; align-items: center; justify-content: center; overflow: hidden;"><MiiHead mii={myMii()} size={32} /></span>
           <span style="font-size: 17px; font-weight: 800; color: var(--text); letter-spacing: 0.01em;">{settings.player?.name ?? 'Party'}<span style="color: var(--accent);">{settings.player ? '' : 'Launcher'}</span></span>
         </a>
@@ -61,25 +61,25 @@
 
     <section style="position: relative; height: 396px;">
       <div style="position: relative; z-index: 2; width: 600px; padding-top: 18px; display: flex; flex-direction: column; align-items: flex-start;">
-        <span style="display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border-radius: 999px; background: #ffffff; box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: var(--label);">
+        <span style="display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px 7px 8px; border-radius: 999px; background: var(--card); box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: var(--label);">
           <span class:motion-pulse={ready} style="width: 18px; height: 18px; border-radius: 999px; background: {ready ? '#25a720' : '#fca20c'}; display: inline-block; box-shadow: inset 0 2px 0 rgba(255,255,255,0.45);"></span>
           {!inTauri ? t('Aperçu dans le navigateur') : !tools ? t('Vérification…') : game.phase === 'running' ? (game.title === 'miis' ? t('Chaîne Mii ouverte') : t('Partie en cours')) : ready ? t('Prêt à jouer') : dolphinOf(tools) ? t('Connecte une Wiimote') : t('Dolphin absent de ce build')}
         </span>
-        <h1 style="margin: 14px 0 0; font-size: 108px; line-height: 108px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent); -webkit-text-stroke: 14px #ffffff; paint-order: stroke fill; text-shadow: 0 8px 0 rgba(var(--shadow),0.10);">Wii Party</h1>
+        <h1 style="margin: 14px 0 0; font-size: 108px; line-height: 108px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent); -webkit-text-stroke: 14px var(--title-stroke); paint-order: stroke fill; text-shadow: 0 8px 0 rgba(var(--shadow),0.10);">Wii Party</h1>
         <p style="margin: 8px 0 0; max-width: 500px; font-size: 17px; line-height: 27px; font-weight: 500; letter-spacing: 0.02em;">{local(theme.tagline) ?? t('Connecte tes Wiimotes, appuie sur Jouer, puis indique ton ISO de Wii Party.')}</p>
 
         <div style="margin-top: 26px; display: flex; align-items: center; gap: 14px;">
           <a href="#/LaunchIso" style="display: inline-flex; align-items: center; gap: 12px; height: 64px; padding: 0 36px 0 18px; border-radius: 999px; text-decoration: none; background: linear-gradient(180deg,var(--grad-top) 0%,var(--grad-bottom) 58%); box-shadow: inset 0 4px 0 rgba(255,255,255,0.45), 0 5px 0 var(--accent-deep), 0 12px 22px rgba(var(--shadow),0.20);">
-            <span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 999px; background: #ffffff; border: 3px solid var(--text); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: var(--text);">A</span>
+            <span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 999px; background: var(--card); border: 3px solid var(--text); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: var(--text);">A</span>
             <span style="font-size: 26px; font-weight: 800; color: #ffffff; -webkit-text-stroke: 6px var(--accent-deep); paint-order: stroke fill;">{t('Jouer')}</span>
           </a>
-          <a href="#/Settings" aria-label={t('Options de lancement')} style="width: 56px; height: 56px; border-radius: 999px; background: #ffffff; color: var(--muted); display: flex; align-items: center; justify-content: center; box-shadow: inset 0 3px 0 rgba(255,255,255,0.45), 0 5px 0 rgba(var(--shadow),0.12);">
+          <a href="#/Settings" aria-label={t('Options de lancement')} style="width: 56px; height: 56px; border-radius: 999px; background: var(--card); color: var(--muted); display: flex; align-items: center; justify-content: center; box-shadow: inset 0 3px 0 rgba(255,255,255,0.45), 0 5px 0 rgba(var(--shadow),0.12);">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"></circle><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.5 5.5l1.8 1.8M16.7 16.7l1.8 1.8M5.5 18.5l1.8-1.8M16.7 7.3l1.8-1.8"></path></svg>
           </a>
         </div>
 
         <div style="margin-top: 18px; display: flex; align-items: center; gap: 12px;">
-          <a href="#/Controllers" style="display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border-radius: 999px; background: #ffffff; text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
+          <a href="#/Controllers" style="display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 12px; border-radius: 999px; background: var(--card); text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
             <span style="font-size: 13px; font-weight: 800; color: var(--label); margin-right: 2px;">{t('Manettes')}</span>
             {#each PLAYERS as p, i}
               <span style="width: 24px; height: 24px; border-radius: 999px; background: {wiimotes.slots[i] ? p.color : 'var(--line)'}; color: {wiimotes.slots[i] ? '#ffffff' : 'var(--muted)'}; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center;">{t('J{n}', { n: i + 1 })}</span>
@@ -106,7 +106,7 @@
     </section>
 
     <section class="cards" aria-label={t('Raccourcis')} style="margin-top: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; height: 222px;">
-      <div style="background: #ffffff; border-radius: 28px; padding: 20px 22px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; gap: 12px;">
+      <div style="background: var(--card); border-radius: 28px; padding: 20px 22px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h2 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text);">{t('Mods')}</h2>
           <a href="#/Library" style="font-size: 13px; font-weight: 800;">{t('Bibliothèque')}</a>
@@ -114,7 +114,7 @@
         <p style="margin: 0; font-size: 14px; line-height: 21px; font-weight: 700; color: var(--muted);">{modsSummary()}</p>
       </div>
 
-      <div style="background: #ffffff; border-radius: 28px; padding: 20px 22px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; gap: 12px;">
+      <div style="background: var(--card); border-radius: 28px; padding: 20px 22px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
           <h2 style="margin: 0; font-size: 17px; font-weight: 800; color: var(--text);">{t('Manettes')}</h2>
           <a href="#/Controllers" style="font-size: 13px; font-weight: 800;">{t('Gérer')}</a>
@@ -129,8 +129,8 @@
       </div>
 
       <div style="position: relative; overflow: hidden; background: var(--tint); border-radius: 28px; padding: 20px 22px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
-        <div aria-hidden="true" style="position: absolute; right: -50px; top: -50px; width: 170px; height: 170px; border-radius: 999px; border: 26px solid var(--grad-top); box-sizing: border-box;"></div>
-        <span style="position: relative; padding: 3px 10px; border-radius: 999px; background: #ffffff; font-size: 12px; font-weight: 800; color: var(--label);">{t('Version')}</span>
+        <div aria-hidden="true" style="position: absolute; right: -50px; top: -50px; width: 170px; height: 170px; border-radius: 999px; border: 26px solid var(--halo); box-sizing: border-box;"></div>
+        <span style="position: relative; padding: 3px 10px; border-radius: 999px; background: var(--card); font-size: 12px; font-weight: 800; color: var(--label);">{t('Version')}</span>
         <h2 style="position: relative; margin: 4px 0 0; font-size: 30px; line-height: 34px; font-weight: 800; color: #ffffff; -webkit-text-stroke: 6px var(--accent-deep); paint-order: stroke fill;">{local(activeVersion()?.name) ?? t('Wii Party d’origine')}</h2>
         <p style="position: relative; margin: 0; max-width: 250px; font-size: 13px; line-height: 19px; font-weight: 700; color: var(--label);">{activeVersion() ? t('Version {v} : le jeu et le launcher sont à ses couleurs.', { v: activeVersion().version }) : t('Le jeu sans version, et le launcher en rose.')}</p>
         <a href="#/Versions" style="position: relative; margin-top: auto; display: inline-flex; align-items: center; height: 38px; padding: 0 18px; border-radius: 999px; background: linear-gradient(180deg,var(--grad-top) 0%,var(--grad-bottom) 62%); text-decoration: none; box-shadow: inset 0 3px 0 rgba(255,255,255,0.45), 0 4px 0 var(--accent-deep);">

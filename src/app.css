@@ -19,6 +19,66 @@
   --rail: #f6e4ea;
   --rail-line: #ecd0da;
   --dot: #e6328c;
+  /* Not in themes: the cards, the camera view, and the colours of a message. */
+  --card: #ffffff;
+  --screen: var(--text);
+  --danger-bg: #fde0e0;
+  --danger: #7a1424;
+  --ok-bg: #d9f0dd;
+  --ok: #17532a;
+  --warn-bg: #f8e6c6;
+  --warn: #6b4100;
+  --decor: var(--tint);
+  --title-stroke: #ffffff;
+  --halo: var(--grad-top);
+  --sky: #b8f0f4;
+  --sky-strong: #8fe6ee;
+  --sky-ink: #1a5f7a;
+}
+
+/* Dark mode (settings.appearance, lib/appearance.svelte.js): a night plum rather than grey, the
+   cards lifted by their lightness, the accent kept for what's pressed and what matters. A version's
+   theme only brings its accent colours then (versions.svelte.js): the rest is drawn from them. */
+:root[data-scheme="dark"] {
+  color-scheme: dark;
+  --bg: #141118;
+  --card: #1f1b25;
+  --surface: #2a2531;
+  --surface-soft: #241f2a;
+  --line: #312b39;
+  --off: #453e4f;
+  --text: #ede8f1;
+  --muted: #a198ab;
+  --tint: color-mix(in srgb, var(--accent) 16%, #1f1b25);
+  --label: color-mix(in srgb, var(--accent) 38%, #ffffff);
+  --decor: color-mix(in srgb, var(--accent) 7%, #141118);
+  --title-stroke: transparent;
+  --halo: color-mix(in srgb, var(--accent) 30%, #1f1b25);
+  --shadow: 0, 0, 0;
+  --scrim: 0, 0, 0;
+  --rail: #19151e;
+  --rail-line: #2a2531;
+  --screen: #0b090d;
+  --danger-bg: #3d1820;
+  --danger: #ffc2cc;
+  --ok-bg: #16331f;
+  --ok: #b2e8bf;
+  --warn-bg: #3a2b16;
+  --warn: #f3d6a2;
+  --sky: #15323a;
+  --sky-strong: #1b414b;
+  --sky-ink: #93dcef;
+}
+
+/* A thin light edge on the cards, which shadows can't separate from the night. */
+:root[data-scheme="dark"] [style*="background: var(--card)"] {
+  outline: 1px solid rgba(255, 255, 255, 0.045);
+  outline-offset: -1px;
+}
+
+:root[data-scheme="dark"] [style*="background: var(--card)"][data-wm-focus] {
+  outline: 4px solid #2cb0fc;
+  outline-offset: 3px;
 }
 
 /* Registered so that they can blend when another version brings its colours. */

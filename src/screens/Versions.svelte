@@ -42,7 +42,7 @@
 {#snippet card(name, details, description, active, id, shipped, icon)}
   <li style="flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 20px; background: {active ? 'var(--tint)' : 'var(--surface-soft)'}; transition: background-color 0.25s ease;">
     {#if icon}
-      <img src={icon} alt="" style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 16px; object-fit: cover; background: #ffffff;">
+      <img src={icon} alt="" style="flex-shrink: 0; width: 56px; height: 56px; border-radius: 16px; object-fit: cover; background: var(--card);">
     {/if}
     <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
       <span style="font-size: 18px; font-weight: 800; color: {active ? 'var(--label)' : 'var(--text)'};">{name}</span>
@@ -50,13 +50,13 @@
       <span style="margin-top: 2px; font-size: 13px; line-height: 19px; font-weight: 500;">{description}</span>
     </span>
     {#if id}
-      <a href="#/ModDetail/{encodeURIComponent(id)}" style="flex-shrink: 0; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 999px; text-decoration: none; background: #ffffff; font-size: 13px; font-weight: 800; color: var(--text);">{t('Détails')}</a>
+      <a href="#/ModDetail/{encodeURIComponent(id)}" style="flex-shrink: 0; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 999px; text-decoration: none; background: var(--card); font-size: 13px; font-weight: 800; color: var(--text);">{t('Détails')}</a>
     {/if}
     {#if id && !shipped}
-      <button type="button" onclick={() => attempt(() => removeVersion(id))} disabled={busy} style="flex-shrink: 0; height: 34px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; background: #ffffff; font-size: 13px; font-weight: 800; color: var(--text);">{t('Retirer')}</button>
+      <button type="button" onclick={() => attempt(() => removeVersion(id))} disabled={busy} style="flex-shrink: 0; height: 34px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; background: var(--card); font-size: 13px; font-weight: 800; color: var(--text);">{t('Retirer')}</button>
     {/if}
     {#if active}
-      <span style="flex-shrink: 0; display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border-radius: 999px; background: #ffffff; font-size: 14px; font-weight: 800; color: var(--label);">{t('Active')}</span>
+      <span style="flex-shrink: 0; display: inline-flex; align-items: center; height: 40px; padding: 0 18px; border-radius: 999px; background: var(--card); font-size: 14px; font-weight: 800; color: var(--label);">{t('Active')}</span>
     {:else}
       <button type="button" onclick={() => attempt(() => activateVersion(id))} disabled={busy} style="flex-shrink: 0; height: 40px; padding: 0 18px; border: 0; border-radius: 999px; cursor: pointer; background: linear-gradient(180deg,var(--grad-top) 0%,var(--grad-bottom) 62%); box-shadow: inset 0 3px 0 rgba(255,255,255,0.45), 0 3px 0 var(--accent-deep); font-size: 15px; font-weight: 800; color: #ffffff; -webkit-text-stroke: 4px var(--accent-deep); paint-order: stroke fill;">{t('Utiliser')}</button>
     {/if}
@@ -64,7 +64,7 @@
 {/snippet}
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
-  <div aria-hidden="true" style="position: absolute; left: 980px; top: -240px; width: 540px; height: 540px; border-radius: 999px; border: 56px solid var(--tint); box-sizing: border-box;"></div>
+  <div aria-hidden="true" style="position: absolute; left: 980px; top: -240px; width: 540px; height: 540px; border-radius: 999px; border: 56px solid var(--decor); box-sizing: border-box;"></div>
   <div style="position: relative; z-index: 1;">
     <Sidebar active="versions" />
   </div>
@@ -75,7 +75,7 @@
       <p style="margin: 4px 0 0; max-width: 680px; font-size: 15px; line-height: 23px; font-weight: 500; letter-spacing: 0.02em;">{t('Une version transforme tout le jeu et habille le launcher. Il y en a une seule à la fois, et tes mods s’appliquent par-dessus.')}</p>
     </header>
 
-    <section aria-label={t('Versions installées')} style="flex-grow: 1; min-height: 0; background: #ffffff; border-radius: 28px; padding: 20px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 12px;">
+    <section aria-label={t('Versions installées')} style="flex-grow: 1; min-height: 0; background: var(--card); border-radius: 28px; padding: 20px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 12px;">
       <PackageDrop title={t('Dépose une version ici')} hint={t('Fichier .wpver')} {busy} ondrop={(paths) => attempt(() => importVersions(paths))} onbrowse={() => attempt(pickVersion)} />
 
       <Notes {notes} />

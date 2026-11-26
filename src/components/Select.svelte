@@ -78,7 +78,17 @@
   }
 
   .trigger svg {
+    flex-shrink: 0;
     transition: rotate 0.18s ease;
+  }
+
+  /* A long choice (a folder) is cut, in the button and in the list. */
+  .trigger span,
+  .option span {
+    max-width: 340px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
   .list {
@@ -92,7 +102,7 @@
     gap: 2px;
     padding: 6px;
     border-radius: 18px;
-    background: #ffffff;
+    background: var(--card);
     box-shadow:
       0 0 0 2px var(--line),
       0 10px 24px rgba(var(--shadow), 0.16);

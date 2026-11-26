@@ -10,6 +10,7 @@ mod minigames;
 mod mii;
 mod modes;
 mod mods;
+mod overlay;
 mod rebuild;
 mod settings;
 mod sound;
@@ -29,12 +30,16 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(settings::Store::default())
         .manage(game::Game::default())
+        .manage(overlay::Overlay::default())
         .manage(versions::Shipped::default())
         .manage(window::Enlarged::default())
         .manage(mii::Library::default())
         .setup(|app| {
             i18n::init(&app.state::<settings::Store>().get(app.handle()).language);
             app.manage(wiimote::start(app.handle().clone()));
+            if app.state::<settings::Store>().get(app.handle()).phone_remotes {
+                app.state::<wiimote::Wiimotes>().set_phones(true);
+            }
             app.manage(discord::start());
             discord::refresh(app.handle());
             mii::prepare(app.handle());
@@ -56,6 +61,9 @@ fn main() {
             game::game_dismiss,
             game::folders_info,
             game::folder_open,
+            game::dolphin_folders,
+            game::dolphin_folder_set,
+            game::dolphin_folder_pick,
             mods::mods_list,
             mods::mods_import,
             mods::mods_pick,

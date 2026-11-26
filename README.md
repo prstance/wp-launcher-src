@@ -9,6 +9,7 @@ Launcher de bureau (Linux, Windows, macOS) : **Tauri 2** + **Svelte 5** + Vite.
 | Jeu, versions `.wpver`, mods `.wpmod` | oui | code commun, non testé | code commun, non testé |
 | Wiimotes connectées par le launcher, main, croix, passage au jeu sans déconnexion | oui | code écrit, non testé | **non** |
 | Wiimotes dans le jeu | par le launcher (socket Unix) | par le launcher (pipe nommé), non testé | par Dolphin, non testé |
+| Téléphone comme Wiimote | essayé dans un navigateur, pas sur un vrai téléphone | code commun, non testé | code commun, non testé |
 
 Le launcher a un transport Bluetooth pour Linux (`src-tauri/src/wiimote/linux.rs`, BlueZ et L2CAP) et
 pour Windows (`windows.rs`, API Bluetooth de Windows et périphérique HID, jamais essayé sur une vraie
@@ -108,6 +109,37 @@ sert à les découvrir, puis le launcher ouvre les deux canaux HID L2CAP (PSM 0x
 - Code : `src-tauri/src/wiimote/` (commandes `wiimote_*`, évènement `wiimotes://state`) et
   `src/lib/wiimotes.svelte.js`.
 
+### Téléphone comme Wiimote
+
+Écran Manettes → « Téléphone » → « Autoriser les téléphones » (réglage `phoneRemotes`, gardé d'un
+lancement à l'autre). Le launcher sert une page sur le réseau local (`phone.html`, `src/phone/`) ; un
+téléphone qui l'ouvre devient une **Wiimote avec MotionPlus** qui prend une place libre, comme une vraie.
+
+- La Wiimote est émulée dans le launcher (`src-tauri/src/wiimote/emulated.rs`) : elle répond aux rapports
+  comme une vraie (mémoire et calibrage de l'accéléromètre, registres, identifiant et calibrage du
+  MotionPlus de Dolphin, rapports 0x30–0x3F, état, accusés). Le reste du launcher la traite comme une
+  autre (`Link::Phone`) : LED, vibration (« Faire vibrer »), pointeur du gyroscope, pont vers Dolphin,
+  changement de place.
+- Le téléphone envoie ses boutons, son accéléromètre (en g) et son gyroscope (en °/s) dans les axes de la
+  Wiimote. L'écran est la face de la Wiimote et le haut du téléphone son avant : x = −X, y = −Y, z = Z
+  du téléphone. La page vérifie le sens de l'accéléromètre et du gyroscope en les comparant à
+  l'orientation que donne aussi le navigateur. Le launcher envoie un rapport toutes les 10 ms.
+- Pas de sensor bar : la caméra ne voit rien, et le MotionPlus pointe comme sur une vraie Wiimote sans barre.
+- Le haut-parleur : avec le pont, Dolphin envoie le son du haut-parleur (`WiimoteEnableSpeaker`). La
+  Wiimote émulée le décode (ADPCM Yamaha ou PCM, comme `Speaker.cpp`), et le téléphone le joue. Une vraie
+  Wiimote n'en reçoit que le bit de vibration, comme quand l'option de Dolphin est désactivée.
+- HTTPS obligatoire : sans lui, les navigateurs ne donnent pas les mouvements du téléphone. Le launcher
+  fait son propre certificat (800 jours au plus, sinon iOS le refuse) dans `<données>/phone/`, et le
+  téléphone l'accepte une fois. Le jeton du QR code (`#…` de l'adresse, gardé dans `phone/token`)
+  protège le WebSocket `/remote`. Ports 8730 à 8739.
+- Une page cachée ou un téléphone verrouillé se tait : 3 s plus tard le launcher le lâche, et il
+  reprend sa place quand il revient (repéré par son adresse IP).
+- En développement, la page vient du serveur de Vite (port 1420). Pour l'essayer sans le launcher :
+  `npm run build`, puis `cargo test a_phone_in_a_browser -- --ignored --nocapture` donne une adresse ;
+  le test affiche ce que la Wiimote envoie, la fait vibrer et lui fait jouer un son.
+- Pas encore essayé sur de vrais téléphones : sens des capteurs sur iOS et Android, latence du Wi-Fi,
+  son, certificat sur iOS.
+
 ## Lancer le jeu
 
 Jouer → choix de l'ISO → vérification → Dolphin (`src-tauri/src/game.rs`, `src/lib/game.svelte.js`).
@@ -134,6 +166,35 @@ Jouer → choix de l'ISO → vérification → Dolphin (`src-tauri/src/game.rs`,
 - Dolphin tourne avec son propre dossier utilisateur (`<données>/dolphin`, sauvegardes comprises) et
   reçoit les réglages en options `-C` : ils ne touchent pas à sa configuration enregistrée. Sa
   sortie va dans `launcher-dolphin.log`, dans ce dossier.
+- Fenêtre de jeu (`src-tauri/src/overlay.rs`, `src/lib/overlay.js`, `WPOverlay.*` dans le fork) : au lieu
+  de l'écran noir, un écran de chargement aux couleurs du launcher (clair ou sombre, celles de la version),
+  avec le nom de la version, les mods et la progression des shaders, jusqu'à ce que le jeu montre sa
+  première scène. Ensuite, des notifications en haut à droite, écrites sur l'entrée standard de Dolphin :
+  la batterie de chaque manette au début de la partie, et « Batterie faible » quand une Wiimote ou un
+  téléphone passe sous 15 % (une fois, à nouveau seulement après être remonté à 20 %). Aussi : la
+  version et les mods au début, un patch de mod que Dolphin n'a pas pu appliquer (`wp-patch-skipped`),
+  une manette déconnectée ou revenue, un nouveau joueur, le pointeur qui passe de la sensor bar au
+  gyroscope (ou l'inverse), un gyroscope à étalonner puis prêt, chaque sauvegarde du jeu (fichiers de
+  `Wii/title/00010000/5355505x/data` surveillés), le Mii enregistré avant que la Chaîne Mii se ferme, et
+  une pause proposée à chaque heure de jeu.
+- Présence Discord (`src-tauri/src/discord.rs`) : notre Dolphin dit où en est le jeu (`wp-state`) et, sur les
+  plateaux de l'Île aux défis, de Globe-trotter et de Trios de Mii, les nombres des joueurs (`wp-stats`,
+  `WPGameState.h` dans le fork) : le tour, les cases avant le défi final (🌋 dans le volcan, 🏁 arrivé), les
+  pièces et photos (💤 au repos), les points ; et combien de joueurs sont humains (« party » de Discord).
+  Les adresses viennent de la décompilation et ne sont pas encore vérifiées en jeu.
+- Paramètres › Jeu et émulateur › « Dossier de Dolphin » fait jouer le Dolphin du launcher dans le dossier
+  utilisateur d'un Dolphin déjà installé (`dolphin_user`, comme WheelWizard) : sa sauvegarde de Wii Party,
+  ses Mii, sa NAND. Le launcher propose ceux qu'il trouve (Linux : `~/.local/share/dolphin-emu`, Flatpak,
+  `~/.dolphin-emu` ; Windows : `%APPDATA%\Dolphin Emulator`, `Documents\Dolphin Emulator` ; macOS :
+  `~/Library/Application Support/Dolphin`), ou n'importe quel dossier qui a un sous-dossier `Wii`. En le
+  choisissant, ses Mii rejoignent la bibliothèque (c'est elle qui est réécrite dans sa base à chaque
+  lancement) et sa base est gardée une fois dans `RFL_DB.dat.launcher-backup`. Le Dolphin du launcher reste
+  celui qui tourne : le pont des Wiimotes, la présence Discord et les mods en ont besoin.
+- Langue du jeu (`consoleLanguage`, `SYSCONF.IPL.LNG`) : « Automatique » (par défaut) prend la langue de
+  l'ordinateur (`navigator.languages`, passées au backend par `locale_set`), l'anglais si la Wii ne l'a pas.
+  Un ancien `gameLanguage` autre que le français d'office est gardé.
+- Sortie audio (`soundMode`, `SYSCONF.IPL.SND`) : mono, stéréo ou surround. Surround active aussi le décodeur
+  Dolby Pro Logic II de Dolphin (`DPL2Decoder`), qui demande le DSP en LLE (`DSPHLE=False`).
 - Les réglages (`src-tauri/src/settings.rs`, `src/lib/settings.svelte.js`) sont dans `settings.json`,
   dans le dossier de configuration de l'application. Le démarrage automatique vit dans l'entrée
   système du plugin autostart : `settings.json` n'en garde qu'une copie pour l'affichage.
@@ -503,9 +564,15 @@ node scripts/check-i18n.mjs   # liste les traductions manquantes ou inutilisées
 - `src/components/WindowControls.svelte` : boutons réduire / agrandir / fermer, ajoutés par
   `App.svelte` sur les écrans qui ne les dessinent pas eux-mêmes.
 - `src/lib/window.js` : appels à la fenêtre Tauri (sans effet hors Tauri).
-- `src/lib/theme.svelte.js` : thème (classique / Mode Hiver), mémorisé. Les couleurs sont des variables
-  CSS dans `src/app.css`, à utiliser dans les écrans (`var(--accent)`…). Les liens disent toujours
-  `#/Main` et `#/Library` ; le routeur affiche `WinterHome` et `WinterLibrary` en Mode Hiver.
+- Les couleurs sont des variables CSS dans `src/app.css`, à utiliser dans les écrans (`var(--accent)`,
+  `var(--card)` pour un fond de carte, `var(--danger)` / `--ok` / `--warn` et leur `-bg` pour un message) :
+  jamais de blanc ou de gris en dur, sauf sur une couleur vive (texte blanc d'un bouton, bouton
+  d'interrupteur, dé).
+- Mode sombre (Paramètres › Général › Apparence : clair par défaut, système, sombre ; `src/lib/appearance.svelte.js`) :
+  `data-scheme="dark"` sur `<html>`, dont les couleurs sont dans `app.css`. Le thème d'une version n'y
+  apporte que ses couleurs d'accent (`accent`, `accent-soft`, `accent-deep`, `grad-top`, `grad-bottom`,
+  `dot`) ; `tint`, `label`, `decor` (les anneaux du fond) et `halo` en sont tirées avec `color-mix`. Les
+  cartes (`background: var(--card)`) y ont un fin liseré clair, faute d'ombre visible.
 
 La fenêtre est sans bordure système (`decorations: false`) : l'en-tête de chaque écran et une fine
 bande en haut servent à la déplacer. Les écrans sont dessinés en 1280×720 et mis à l'échelle

@@ -23,7 +23,7 @@
   const current = $derived(list[shown]);
 </script>
 
-<div class="motion-float" style="position: absolute; left: 90px; top: 66px; width: 392px; height: 306px; border-radius: 40px; background: #ffffff; transform: rotate(-6deg); box-shadow: 0 8px 0 rgba(var(--shadow),0.10), 0 24px 50px rgba(var(--shadow),0.16);">
+<div class="motion-float" style="position: absolute; left: 90px; top: 66px; width: 392px; height: 306px; border-radius: 40px; background: var(--card); transform: rotate(-6deg); box-shadow: 0 8px 0 rgba(var(--shadow),0.10), 0 24px 50px rgba(var(--shadow),0.16);">
   <div style="position: absolute; inset: 15px; border-radius: 27px; overflow: hidden; background: var(--surface-soft);">
     {#each list as mode, i (mode.id)}
       <img src={mode.image} alt="" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: {i === shown ? 1 : 0}; transition: opacity 0.7s ease;">

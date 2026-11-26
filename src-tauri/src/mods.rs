@@ -1270,6 +1270,16 @@ pub fn boot_file(app: &AppHandle, disc: &Disc, settings: &Settings) -> Result<Op
     Ok(Some(path))
 }
 
+/// Each package's folder as the descriptor gives it to Dolphin (the root of its patches), with
+/// the package's name: whose patch Dolphin couldn't apply. The mods' linked code has its own.
+pub fn patch_roots(app: &AppHandle, packages: &[Installed]) -> Vec<(String, String)> {
+    let mut roots: Vec<(String, String)> = packages.iter().map(|m| (dolphin_path(&m.dir), m.manifest.name.to_string())).collect();
+    if let Ok(dir) = data_dir(app, "mods") {
+        roots.push((dolphin_path(&linked_dir(&dir)), tr!("le code des mods")));
+    }
+    roots
+}
+
 /// Where link_code puts what it makes (the descriptor names its linked.xml).
 fn linked_dir(dir: &Path) -> PathBuf {
     dir.join(".linked")

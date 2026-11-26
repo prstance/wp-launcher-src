@@ -9,7 +9,7 @@
   {#each items as item (item.key)}
     {@const on = item.key === selected}
     <button type="button" role="radio" aria-checked={on} aria-label={item.label ?? item.mii?.name} title={item.label ?? item.mii?.name} onclick={() => onpick(item.key)} style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px {item.label ? 6 : 8}px; border: 0; border-radius: 22px; cursor: pointer; background: {on ? 'var(--tint)' : 'var(--surface-soft)'}; box-shadow: {on ? 'inset 0 0 0 4px var(--accent), 0 4px 0 rgba(var(--shadow),0.10)' : '0 3px 0 rgba(var(--shadow),0.06)'};">
-      <span style="width: {size}px; height: {size}px; border-radius: 999px; background: #ffffff; box-shadow: inset 0 -4px 0 {item.mii?.color ?? '#e3e0e2'}33; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+      <span style="width: {size}px; height: {size}px; border-radius: 999px; background: var(--card); box-shadow: inset 0 -4px 0 {item.mii?.color ?? '#e3e0e2'}33; display: flex; align-items: center; justify-content: center; overflow: hidden;">
         <MiiHead mii={item.mii} size={size} />
       </span>
       {#if item.label}

@@ -238,8 +238,28 @@ pub fn prepare(app: &AppHandle) {
     });
 }
 
+/// The Mii database of a Dolphin user folder.
+pub fn database_in(user: &Path) -> PathBuf {
+    user.join("Wii/shared2/menu/FaceLib/RFL_DB.dat")
+}
+
 fn nand_database(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(data_dir(app, "dolphin")?.join("Wii/shared2/menu/FaceLib/RFL_DB.dat"))
+    Ok(database_in(&game::user_dir(app, &app.state::<Store>().get(app))?))
+}
+
+/// Before the launcher first plays in the player's own Dolphin folder: its Miis join the library,
+/// which is what goes back to its database at each launch, and the database is kept aside once
+/// (RFL_DB.dat.launcher-backup).
+pub fn adopt_folder(app: &AppHandle, user: &Path) -> Result<(), String> {
+    let path = database_in(user);
+    let Ok(bytes) = std::fs::read(&path) else { return Ok(()) };
+    let backup = path.with_extension("dat.launcher-backup");
+    if !backup.exists() {
+        std::fs::write(&backup, &bytes).map_err(io)?;
+    }
+    add(app, data::read_database(&bytes))?;
+    changed(app);
+    Ok(())
 }
 
 /// Puts the library in Dolphin's Mii database, the player's Mii first, before
@@ -486,6 +506,6 @@ pub async fn miis_export(app: AppHandle, id: String) -> Result<bool, String> {
 
 /// Opens the Mii Channel, taken from the disc, in Dolphin; the Miis made there join the library.
 #[tauri::command]
-pub async fn miis_channel(app: AppHandle) -> Result<(), String> {
-    game::open_mii_channel(app).await
+pub async fn miis_channel(app: AppHandle, look: Option<serde_json::Value>) -> Result<(), String> {
+    game::open_mii_channel(app, look).await
 }

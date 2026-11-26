@@ -72,7 +72,7 @@
         {:else if discMiis.loading && !discMiis.list.length}
           <p role="status" class="empty">{t('Le launcher lit les Mii de ton disque…')}</p>
         {:else if discMiis.error}
-          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{discMiis.error}</p>
+          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{discMiis.error}</p>
         {:else}
           <MiiPicker items={items(discMiis.list)} selected={s.value} onpick={pick} size={58} label={t('Mii de Wii Party')} />
         {/if}
@@ -110,7 +110,7 @@
     width: 34px;
     height: 34px;
     border-radius: 999px;
-    background: #ffffff;
+    background: var(--card);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -140,7 +140,7 @@
     height: 600px;
     max-height: calc(100% - 32px);
     box-sizing: border-box;
-    background: #ffffff;
+    background: var(--card);
     border-radius: 40px;
     padding: 26px 30px 22px;
     box-shadow: 0 12px 40px rgba(var(--shadow), 0.24);

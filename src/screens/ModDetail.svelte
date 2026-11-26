@@ -79,14 +79,14 @@
 </script>
 
 {#snippet card(title, body)}
-  <section style="background: #ffffff; border-radius: 28px; padding: 18px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 8px;">
+  <section style="background: var(--card); border-radius: 28px; padding: 18px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 8px;">
     <h2 style="margin: 0; font-size: 18px; font-weight: 800;">{title}</h2>
     {@render body()}
   </section>
 {/snippet}
 
 {#snippet note(level, text)}
-  <p role={level === 'error' ? 'alert' : 'status'} style="margin: 0; padding: 8px 14px; border-radius: 14px; background: {level === 'error' ? '#fde0e0' : level === 'ok' ? '#d9f0dd' : '#f8e6c6'}; font-size: 13px; font-weight: 700; color: {level === 'error' ? '#7a1424' : level === 'ok' ? '#17532a' : '#6b4100'}; overflow-wrap: anywhere;">{text}</p>
+  <p role={level === 'error' ? 'alert' : 'status'} style="margin: 0; padding: 8px 14px; border-radius: 14px; background: {level === 'error' ? 'var(--danger-bg)' : level === 'ok' ? 'var(--ok-bg)' : 'var(--warn-bg)'}; font-size: 13px; font-weight: 700; color: {level === 'error' ? 'var(--danger)' : level === 'ok' ? 'var(--ok)' : 'var(--warn)'}; overflow-wrap: anywhere;">{text}</p>
 {/snippet}
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
@@ -95,13 +95,13 @@
   </div>
 
   <main style="flex-grow: 1; position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; padding: 18px 40px 0 44px; min-width: 0;">
-    <a href={back} style="flex-shrink: 0; align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 8px; border-radius: 999px; background: #ffffff; text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
+    <a href={back} style="flex-shrink: 0; align-self: flex-start; display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px 0 8px; border-radius: 999px; background: var(--card); text-decoration: none; box-shadow: 0 4px 0 rgba(var(--shadow),0.10);">
       <span aria-hidden="true" style="width: 26px; height: 26px; border-radius: 8px; border: 3px solid var(--text); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: var(--text);">B</span>
       <span style="font-size: 14px; font-weight: 800; color: var(--text);">{isVersion ? t('Retour aux versions') : t('Retour à la bibliothèque')}</span>
     </a>
 
     {#if !inTauri || !detail}
-      <section style="flex-grow: 1; margin-bottom: 24px; background: #ffffff; border-radius: 28px; padding: 32px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;">
+      <section style="flex-grow: 1; margin-bottom: 24px; background: var(--card); border-radius: 28px; padding: 32px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;">
         <span aria-hidden="true" style="width: 72px; height: 72px; border-radius: 24px; background: var(--tint); display: flex; align-items: center; justify-content: center;">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="stroke: var(--accent)"><path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"></path><path d="M4 7.5l8 4 8-4M12 11.5v9"></path></svg>
         </span>
@@ -110,7 +110,7 @@
     {:else}
       <div style="flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; gap: 22px; align-items: flex-start; padding-bottom: 24px;">
         <div class="fade-in" style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
-          <section style="background: #ffffff; border-radius: 28px; padding: 22px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 14px;">
+          <section style="background: var(--card); border-radius: 28px; padding: 22px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 14px;">
             <div style="display: flex; align-items: center; gap: 16px;">
               {#if detail.icon}
                 <img src={detail.icon} alt="" style="flex-shrink: 0; width: 72px; height: 72px; border-radius: 22px; object-fit: cover;">
@@ -184,7 +184,7 @@
               <p style="margin: 0; font-size: 14px; font-weight: 700; color: var(--muted);">{t('Aucune modification détectée avec ces réglages.')}</p>
             {/if}
             {#if detail.changes.partial}
-              <p style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 700; color: #6b4100;">{t('Une partie de ce qu’il modifie n’a pas pu être analysée.')}</p>
+              <p style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 700; color: var(--warn);">{t('Une partie de ce qu’il modifie n’a pas pu être analysée.')}</p>
             {/if}
             {#if Object.keys(detail.requires).length}
               <p style="margin: 4px 0 0; font-size: 13px; line-height: 19px; font-weight: 700;"><span style="color: var(--label);">{t('A besoin de :')}</span> {Object.entries(detail.requires).map(([m, r]) => m + range(r)).join(', ')}</p>
@@ -198,7 +198,7 @@
           <Notes notes={detail.problems.length ? detail.problems : detail.enabled ? [{ level: 'ok', message: t('Aucun conflit avec les autres mods activés.') }] : []} />
 
           {#if !detail.shipped}
-            <button type="button" onclick={remove} disabled={busy} style="align-self: flex-start; height: 38px; padding: 0 16px; border: 0; border-radius: 999px; cursor: pointer; background: #ffffff; box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: #a3283c;">{isVersion ? t('Retirer cette version') : t('Retirer ce mod')}</button>
+            <button type="button" onclick={remove} disabled={busy} style="align-self: flex-start; height: 38px; padding: 0 16px; border: 0; border-radius: 999px; cursor: pointer; background: var(--card); box-shadow: 0 4px 0 rgba(var(--shadow),0.10); font-size: 13px; font-weight: 800; color: #a3283c;">{isVersion ? t('Retirer cette version') : t('Retirer ce mod')}</button>
           {/if}
         </aside>
       </div>

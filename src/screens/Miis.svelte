@@ -97,7 +97,7 @@
 </script>
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
-  <div aria-hidden="true" style="position: absolute; left: 960px; top: -260px; width: 560px; height: 560px; border-radius: 999px; border: 56px solid var(--tint); box-sizing: border-box;"></div>
+  <div aria-hidden="true" style="position: absolute; left: 960px; top: -260px; width: 560px; height: 560px; border-radius: 999px; border: 56px solid var(--decor); box-sizing: border-box;"></div>
   <div style="position: relative; z-index: 1;">
     <Sidebar active="miis" />
   </div>
@@ -105,11 +105,11 @@
   <main style="flex-grow: 1; position: relative; z-index: 1; display: flex; flex-direction: column; gap: 14px; padding: 18px 40px 24px 44px; min-width: 0;">
     <header data-tauri-drag-region style="display: flex; align-items: center; gap: 16px; height: 52px;">
       <h1 style="margin: 0; font-size: 34px; line-height: 40px; font-weight: 800; color: var(--accent);">{t('Mes Mii')}</h1>
-      <span style="padding: 4px 12px; border-radius: 999px; background: #ffffff; font-size: 13px; font-weight: 800; color: var(--label); box-shadow: 0 3px 0 rgba(var(--shadow),0.08);">{miis.list.length} / {miis.max}</span>
+      <span style="padding: 4px 12px; border-radius: 999px; background: var(--card); font-size: 13px; font-weight: 800; color: var(--label); box-shadow: 0 3px 0 rgba(var(--shadow),0.08);">{miis.list.length} / {miis.max}</span>
     </header>
 
     <div style="display: flex; gap: 24px; flex-grow: 1; min-height: 0;">
-      <aside style="width: 290px; flex-shrink: 0; background: #ffffff; border-radius: 28px; padding: 22px 20px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; align-items: center; gap: 12px;">
+      <aside style="width: 290px; flex-shrink: 0; background: var(--card); border-radius: 28px; padding: 22px 20px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.08); display: flex; flex-direction: column; align-items: center; gap: 12px;">
         <p style="margin: 0; align-self: flex-start; font-size: 13px; font-weight: 800; color: var(--label);">{t('Mon compte')}</p>
         <div style="width: 150px; height: 150px; border-radius: 999px; background: var(--surface-soft); box-shadow: inset 0 -8px 0 {myMii()?.color ?? 'var(--accent)'}40; display: flex; align-items: center; justify-content: center;">
           <MiiHead mii={myMii()} size={128} />
@@ -131,7 +131,7 @@
         </div>
       </aside>
 
-      <section aria-label={t('Bibliothèque de Mii')} style="flex-grow: 1; min-width: 0; background: {dragging ? 'var(--tint)' : '#ffffff'}; border-radius: 28px; padding: 18px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 12px;">
+      <section aria-label={t('Bibliothèque de Mii')} style="flex-grow: 1; min-width: 0; background: {dragging ? 'var(--tint)' : 'var(--card)'}; border-radius: 28px; padding: 18px; box-sizing: border-box; box-shadow: 0 6px 0 rgba(var(--shadow),0.10), 0 10px 20px rgba(var(--shadow),0.06); display: flex; flex-direction: column; gap: 12px;">
         <div style="flex-grow: 1; min-height: 0; overflow-y: auto;">
           {#if miis.list.length}
             <MiiPicker {items} {selected} onpick={(k) => (selected = k)} size={72} label={t('Bibliothèque de Mii')} />
@@ -144,17 +144,17 @@
         </div>
 
         {#if error}
-          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{error}</p>
+          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{error}</p>
         {:else if notice}
-          <p role="status" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #d9f0dd; font-size: 13px; font-weight: 700; color: #17532a;">{notice}</p>
+          <p role="status" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--ok-bg); font-size: 13px; font-weight: 700; color: var(--ok);">{notice}</p>
         {/if}
 
         {#if current}
           <footer class="fade-in" style="display: flex; align-items: center; gap: 14px; padding: 10px 12px 10px 10px; border-radius: 24px; background: var(--surface-soft);">
-            <span style="width: 56px; height: 56px; border-radius: 999px; background: #ffffff; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><MiiHead mii={current} size={50} /></span>
+            <span style="width: 56px; height: 56px; border-radius: 999px; background: var(--card); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><MiiHead mii={current} size={50} /></span>
             <label style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
               <span style="font-size: 11px; font-weight: 800; color: var(--muted);">{t('Nom du Mii')}{current.creator ? ` · ${t('créé par {name}', { name: current.creator })}` : ''}</span>
-              <input bind:value={miiName} onchange={rename} maxlength="10" spellcheck="false" style="width: 170px; height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: #ffffff; box-shadow: inset 0 0 0 2px var(--line); font-size: 16px; font-weight: 800; color: var(--text); outline: none;">
+              <input bind:value={miiName} onchange={rename} maxlength="10" spellcheck="false" style="width: 170px; height: 36px; padding: 0 12px; border: 0; border-radius: 12px; background: var(--card); box-shadow: inset 0 0 0 2px var(--line); font-size: 16px; font-weight: 800; color: var(--text); outline: none;">
             </label>
             <span style="flex-grow: 1;"></span>
             {#if mine}
@@ -177,7 +177,7 @@
   {#if adding}
     <div style="position: absolute; inset: 0; z-index: 30; background: rgba(var(--scrim),0.52); display: flex; align-items: center; justify-content: center;">
       <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-      <section role="dialog" aria-modal="true" aria-labelledby="disc-title" class="fade-in" style="width: 860px; height: 600px; box-sizing: border-box; background: #ffffff; border-radius: 40px; padding: 26px 30px 22px; box-shadow: 0 12px 40px rgba(var(--shadow),0.24); display: flex; flex-direction: column; gap: 14px;">
+      <section role="dialog" aria-modal="true" aria-labelledby="disc-title" class="fade-in" style="width: 860px; height: 600px; box-sizing: border-box; background: var(--card); border-radius: 40px; padding: 26px 30px 22px; box-shadow: 0 12px 40px rgba(var(--shadow),0.24); display: flex; flex-direction: column; gap: 14px;">
         <div>
           <h2 id="disc-title" style="margin: 0; font-size: 26px; font-weight: 800; color: var(--accent);">{t('Les Mii de Wii Party')}</h2>
           <p style="margin: 4px 0 0; font-size: 14px; font-weight: 600;">{t('Choisis un visage : il devient un Mii à toi, avec le nom de ton choix.')}</p>
@@ -186,7 +186,7 @@
           {#if discMiis.loading && !discMiis.list.length}
             <p role="status" style="height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; color: var(--muted);">{t('Le launcher lit les Mii de ton disque…')}</p>
           {:else if discMiis.error}
-            <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{discMiis.error}</p>
+            <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{discMiis.error}</p>
           {:else}
             <MiiPicker items={discMiis.list.map((m) => ({ key: `disc:${m.id}`, mii: m, label: '' }))} selected={adding.pick} onpick={pickDisc} size={58} label={t('Mii de Wii Party')} />
           {/if}
@@ -227,7 +227,7 @@
     border: 0;
     border-radius: 999px;
     cursor: pointer;
-    background: #ffffff;
+    background: var(--card);
     box-shadow: inset 0 0 0 2px var(--line), 0 3px 0 rgba(var(--shadow), 0.08);
     font-size: 14px;
     font-weight: 800;

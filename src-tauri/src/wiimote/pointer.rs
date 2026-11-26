@@ -110,6 +110,15 @@ impl Source {
     }
 }
 
+/// What points, as the game's notifications tell it: the bar, the MotionPlus, or a MotionPlus
+/// still learning its rest value (the remote has to be put down a moment).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Aim {
+    Bar,
+    Gyro,
+    Learning,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ForGame {
     /// The camera's own dots: a real bar.
@@ -249,6 +258,8 @@ pub struct Pointer {
     last: Option<Instant>,
     /// The last report's gyroscope rates (°/s yaw roll pitch), for the trace.
     rate: Option<[f32; 3]>,
+    /// The last report with MotionPlus data.
+    motion_at: Option<Instant>,
 }
 
 impl Default for Pointer {
@@ -272,6 +283,7 @@ impl Default for Pointer {
             tilt_zero: None,
             last: None,
             rate: None,
+            motion_at: None,
         }
     }
 }
@@ -377,7 +389,21 @@ impl Pointer {
         seen
     }
 
+    /// What points now; None: nothing (no bar and no MotionPlus).
+    pub fn aim(&self, now: Instant) -> Option<Aim> {
+        if self.bar_mode {
+            Some(Aim::Bar)
+        } else if self.motion_at.is_some_and(|t| now.saturating_duration_since(t) < Duration::from_secs(1)) {
+            Some(if self.gyro.ready() { Aim::Gyro } else { Aim::Learning })
+        } else {
+            None
+        }
+    }
+
     fn step(&mut self, dots: &[(f32, f32)], accel: [u16; 3], motion: Option<&MotionPlus>, now: Instant) -> Seen {
+        if motion.is_some() {
+            self.motion_at = Some(now);
+        }
         if let Some(since) = self.last.map(|t| now.saturating_duration_since(t).as_secs_f32()).filter(|&s| s < 0.1) {
             self.period += (since - self.period) * PERIOD_WEIGHT;
         }

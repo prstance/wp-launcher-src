@@ -9,6 +9,10 @@ use std::fmt;
 use std::sync::RwLock;
 
 static LANG: RwLock<&str> = RwLock::new("fr");
+/// The computer's languages, most wanted first, as the page reads them (navigator.languages).
+static SYSTEM: RwLock<Vec<String>> = RwLock::new(Vec::new());
+/// The Wii console's languages, by their number in SYSCONF IPL.LNG.
+const CONSOLE: [&str; 7] = ["ja", "en", "de", "fr", "es", "it", "nl"];
 
 /// The launcher's language: "fr", "en" or "es".
 pub fn lang() -> &'static str {
@@ -159,6 +163,51 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("Le code des mods ne s’assemble pas{who} : {why}", "The mods' code doesn't fit together{who}: {why}", "El código de los mods no encaja{who}: {why}"),
     ("son patch de son « {patch} » n’est pas valide", "its sound patch “{patch}” isn't valid", "su parche de sonido «{patch}» no es válido"),
     ("« {a} » et « {b} » changent le même son du jeu ({key}) : celui de « {b} » est gardé.", "“{a}” and “{b}” change the same game sound ({key}): the one from “{b}” is kept.", "«{a}» y «{b}» cambian el mismo sonido del juego ({key}): se queda el de «{b}»."),
+    ("Le dossier de Dolphin choisi n’existe plus ({dir}) : choisis-en un autre dans Paramètres › Jeu et émulateur.", "The chosen Dolphin folder doesn't exist anymore ({dir}): pick another one in Settings › Game and emulator.", "La carpeta de Dolphin elegida ya no existe ({dir}): elige otra en Ajustes › Juego y emulador."),
+    ("Arrête la partie avant de changer de dossier Dolphin.", "Stop the game before changing the Dolphin folder.", "Detén la partida antes de cambiar la carpeta de Dolphin."),
+    ("Ce n’est pas un dossier utilisateur de Dolphin : il n’a pas de dossier Wii. Lance une fois un jeu Wii avec ce Dolphin, ou choisis le dossier qui contient Wii, Config et GameSettings.", "This isn't a Dolphin user folder: it has no Wii folder. Start a Wii game once with this Dolphin, or pick the folder that holds Wii, Config and GameSettings.", "No es una carpeta de usuario de Dolphin: no tiene carpeta Wii. Inicia una vez un juego de Wii con ese Dolphin o elige la carpeta que contiene Wii, Config y GameSettings."),
+    ("Choisis le dossier utilisateur de Dolphin", "Choose Dolphin's user folder", "Elige la carpeta de usuario de Dolphin"),
+    ("Tour {n}/{max}", "Round {n}/{max}", "Ronda {n}/{max}"),
+    ("Tour {n}", "Round {n}", "Ronda {n}"),
+    ("J{n}", "P{n}", "J{n}"),
+    ("{who} {n} pts", "{who} {n} pts", "{who} {n} pts"),
+    ("Cases restantes : {list}", "Spaces left: {list}", "Casillas restantes: {list}"),
+    ("Pas de réseau local : connecte l’ordinateur au Wi-Fi ou par câble.", "No local network: connect the computer to Wi-Fi or by cable.", "No hay red local: conecta el ordenador por Wi-Fi o por cable."),
+    ("Aucun port libre pour les téléphones ({from}–{to})", "No free port for phones ({from}–{to})", "No hay ningún puerto libre para los teléfonos ({from}–{to})"),
+    ("{n} %", "{n}%", "{n} %"),
+    ("Téléphone", "Phone", "Teléfono"),
+    ("Manettes", "Controllers", "Mandos"),
+    ("Une batterie est presque vide.", "A battery is almost empty.", "Una batería está casi vacía."),
+    ("Batterie faible", "Low battery", "Batería baja"),
+    ("Branche le téléphone de J{n} sur un chargeur.", "Plug P{n}'s phone into a charger.", "Conecta el teléfono de J{n} a un cargador."),
+    ("Les piles de la Wiimote de J{n} sont presque vides.", "P{n}'s Wii Remote batteries are almost empty.", "Las pilas del Wiimote de J{n} están casi gastadas."),
+    ("le code des mods", "the mods’ code", "el código de los mods"),
+    ("Le téléphone de J{n} est déconnecté", "P{n}’s phone is disconnected", "El teléfono de J{n} se ha desconectado"),
+    ("La Wiimote de J{n} est déconnectée", "P{n}’s Wii Remote is disconnected", "El Wiimote de J{n} se ha desconectado"),
+    ("Rouvre la page du launcher sur le téléphone : il reprendra sa place.", "Open the launcher’s page on the phone again: it will take its place back.", "Vuelve a abrir la página del launcher en el teléfono: recuperará su plaza."),
+    ("Appuie sur 1 et 2 de la Wiimote : elle reprendra sa place.", "Press 1 and 2 on the Wii Remote: it will take its place back.", "Pulsa 1 y 2 en el Wiimote: recuperará su plaza."),
+    ("J{n} est de retour", "P{n} is back", "J{n} ha vuelto"),
+    ("J{n} rejoint la partie", "P{n} joins the game", "J{n} se une a la partida"),
+    ("Sensor bar trouvée", "Sensor bar found", "Barra de sensores encontrada"),
+    ("Le pointeur suit la sensor bar.", "The pointer follows the sensor bar.", "El puntero sigue la barra de sensores."),
+    ("Plus de sensor bar", "No sensor bar anymore", "Ya no hay barra de sensores"),
+    ("Le pointeur suit le gyroscope de la manette.", "The pointer follows the controller’s gyroscope.", "El puntero sigue el giroscopio del mando."),
+    ("Gyroscope à étalonner", "Gyroscope needs calibrating", "Hay que calibrar el giroscopio"),
+    ("Pose la manette à plat sans la toucher un instant : le pointeur se règle.", "Put the controller down flat without touching it for a moment: the pointer sets itself up.", "Deja el mando plano sin tocarlo un momento: el puntero se ajusta."),
+    ("Pointeur prêt", "Pointer ready", "Puntero listo"),
+    ("Le gyroscope est étalonné.", "The gyroscope is calibrated.", "El giroscopio está calibrado."),
+    ("Mods actifs", "Active mods", "Mods activos"),
+    ("Avec {names}", "With {names}", "Con {names}"),
+    ("Sans autre mod", "No other mods", "Sin otros mods"),
+    ("Un mod ne s’applique pas entièrement", "A mod doesn’t fully apply", "Un mod no se aplica del todo"),
+    ("Une partie du jeu n’est pas celle que le mod attend : il n’est peut-être pas fait pour cette version du jeu.", "Part of the game isn’t what the mod expects: it may not be made for this version of the game.", "Una parte del juego no es la que el mod espera: quizá no esté hecho para esta versión del juego."),
+    ("{names} : une partie du jeu n’est pas celle qu’il attend. Il n’est peut-être pas fait pour cette version du jeu.", "{names}: part of the game isn’t what it expects. It may not be made for this version of the game.", "{names}: una parte del juego no es la que espera. Quizá no esté hecho para esta versión del juego."),
+    ("Sauvegarde créée", "Save created", "Partida guardada creada"),
+    ("Partie sauvegardée", "Game saved", "Partida guardada"),
+    ("Mii enregistré", "Mii saved", "Mii guardado"),
+    ("Retour au launcher dans {n} s : le Mii rejoint ta bibliothèque.", "Back to the launcher in {n} s: the Mii joins your library.", "Vuelta al launcher en {n} s: el Mii se une a tu biblioteca."),
+    ("Petite pause ?", "Time for a break?", "¿Una pausa?"),
+    ("Vous jouez depuis {n} h : buvez un peu d’eau et dégourdissez-vous les jambes.", "You’ve been playing for {n} h: have some water and stretch your legs.", "Lleváis {n} h jugando: bebed un poco de agua y estirad las piernas."),
 ];
 
 /// The French `fr` in the launcher's language.
@@ -194,14 +243,26 @@ fn set(lang: &str) {
     };
 }
 
+/// The system's language from its environment ("fr_FR.UTF-8" → "fr"), until the page says.
+fn env_language() -> String {
+    let system = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty()));
+    system.unwrap_or_default().get(..2).unwrap_or("").to_lowercase()
+}
+
 /// Until the page says, the saved choice, or the system's language for "auto".
 pub fn init(saved: &str) {
     if saved != "auto" {
         return set(saved);
     }
-    let system = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty()));
-    let code = system.unwrap_or_default().get(..2).unwrap_or("").to_lowercase();
+    let code = env_language();
     set(if ["fr", "es"].contains(&code.as_str()) { &code } else { "en" });
+}
+
+/// The console language closest to the computer's (SYSCONF IPL.LNG), English if the
+/// Wii has none of its languages.
+pub fn console_language() -> u32 {
+    let page = SYSTEM.read().unwrap().clone();
+    page.into_iter().chain([env_language()]).find_map(|code| CONSOLE.iter().position(|c| *c == code)).map_or(1, |n| n as u32)
 }
 
 /// A text from a package: one, or the same per language ({"fr": …, "en": …}).
@@ -244,9 +305,13 @@ impl fmt::Display for Text {
     }
 }
 
+/// `system`: the computer's languages, as two-letter codes, for the game's language.
 #[tauri::command]
-pub fn locale_set(lang: String) {
+pub fn locale_set(lang: String, system: Option<Vec<String>>) {
     set(&lang);
+    if let Some(system) = system {
+        *SYSTEM.write().unwrap() = system;
+    }
 }
 
 #[cfg(test)]
@@ -262,5 +327,13 @@ mod tests {
         assert_eq!(serde_json::from_str::<Text>(r#""Neige""#).unwrap(), Text::One("Neige".into()));
         assert!(serde_json::from_str::<Text>(r#"{"fr":"Neige","en":" "}"#).unwrap().is_blank());
         assert!(Text::default().is_blank());
+    }
+
+    #[test]
+    fn the_game_speaks_the_computers_language() {
+        *SYSTEM.write().unwrap() = vec!["pt".into(), "de".into(), "en".into()];
+        assert_eq!(console_language(), 2);
+        *SYSTEM.write().unwrap() = vec!["pt".into()];
+        assert!([1, CONSOLE.iter().position(|c| *c == env_language()).unwrap_or(1) as u32].contains(&console_language()));
     }
 }

@@ -5,24 +5,39 @@
   import { invoke } from '@tauri-apps/api/core';
   import { inTauri } from '../lib/tauri.js';
   import { toolsStatus } from '../lib/tools.js';
-  import { settings, setSettings, pickIso } from '../lib/settings.svelte.js';
+  import { settings, setSettings, pickIso, dolphinFolders, setDolphinFolder, pickDolphinFolder } from '../lib/settings.svelte.js';
   import { activeVersion } from '../lib/versions.svelte.js';
   import { mods, modsSummary } from '../lib/mods.svelte.js';
   import { t, plural, local, LANGUAGES as LAUNCHER_LANGUAGES } from '../lib/i18n.svelte.js';
 
   const SECTIONS = $derived([t('Général'), t('Jeu et émulateur'), t('Graphismes'), t('Audio'), t('Mods'), t('À propos')]);
-  const LANGUAGES = [[3, 'Français'], [1, 'English'], [2, 'Deutsch'], [4, 'Español'], [5, 'Italiano'], [6, 'Nederlands'], [0, '日本語']];
+  const LANGUAGES = $derived([[null, t('Automatique')], [3, 'Français'], [1, 'English'], [2, 'Deutsch'], [4, 'Español'], [5, 'Italiano'], [6, 'Nederlands'], [0, '日本語']]);
+  // The Wii's own sound setting.
+  const SOUND_MODES = $derived([[0, t('Mono')], [1, t('Stéréo')], [2, t('Surround')]]);
   // Dolphin's multipliers of the Wii's 640×528.
   const RESOLUTIONS = $derived([[1, t('1× (natif, 528p)')], [2, '2× (720p)'], [3, '3× (1080p)'], [4, '4× (1440p)'], [6, '6× (4K)']]);
   const WINDOW_MODES = $derived([[0, t('Plein écran')], [1, t('Plein écran fenêtré')], [2, t('Fenêtré')]]);
   const ASPECTS = $derived([[0, t('Automatique')], [1, '16:9'], [2, '4:3'], [3, t('Étirer à la fenêtre')]]);
   const LAUNCHER_LANGUAGE = $derived([['auto', t('Automatique')], ...LAUNCHER_LANGUAGES]);
+  const APPEARANCES = $derived([['light', t('Clair')], ['system', t('Système')], ['dark', t('Sombre')]]);
 
   let sec = $state(1);
   let error = $state(null);
   let version = $state(null);
   let tools = $state([]);
   let folders = $state(null);
+  /** The player's own Dolphin folders: [{ path, save }]. */
+  let dolphins = $state([]);
+  const DOLPHIN_FOLDERS = $derived([
+    [null, t('Celui du launcher')],
+    ...dolphins.map((d) => [d.path, d.path]),
+    ['pick', t('Autre dossier…')],
+  ]);
+  const dolphinInfo = $derived.by(() => {
+    if (!settings.dolphinUser) return t('Le jeu garde sa sauvegarde dans le launcher. Choisis ton Dolphin pour jouer sur ta sauvegarde et avec tes Mii');
+    const found = dolphins.find((d) => d.path === settings.dolphinUser);
+    return found?.save ? t('Ta sauvegarde de Wii Party et tes Mii de ce Dolphin') : t('Pas encore de sauvegarde de Wii Party dans ce Dolphin : le jeu en créera une');
+  });
   /** The launcher's update: "idle", "checking", "none" (up to date), "found" (newer: `newer`), "installing". */
   let updating = $state('idle');
   let newer = $state(null);
@@ -32,6 +47,7 @@
     if (!inTauri) return;
     getVersion().then((v) => (version = v));
     invoke('folders_info').then((f) => (folders = f));
+    dolphinFolders().then((d) => (dolphins = d));
   });
 
   const attempt = async (work) => {
@@ -43,6 +59,12 @@
     }
   };
   const set = (key, value) => attempt(() => setSettings({ [key]: value }));
+  const chooseDolphin = (path) =>
+    attempt(async () => {
+      if (!inTauri) throw t('Disponible dans l’application de bureau.');
+      await (path === 'pick' ? pickDolphinFolder() : setDolphinFolder(path));
+      dolphins = await dolphinFolders();
+    });
   const changeIso = () => attempt(() => (inTauri ? pickIso() : Promise.reject(t('Disponible dans l’application de bureau.'))));
   const openFolder = (which) => attempt(() => invoke('folder_open', { which }));
   const checkUpdate = () =>
@@ -111,7 +133,7 @@
     </div>
 
     <div style="display: flex; gap: 22px; flex-grow: 1; min-height: 0;">
-      <nav aria-label={t('Sections des paramètres')} style="width: 230px; flex-shrink: 0; align-self: flex-start; background: #ffffff; border-radius: 28px; padding: 10px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 4px;">
+      <nav aria-label={t('Sections des paramètres')} style="width: 230px; flex-shrink: 0; align-self: flex-start; background: var(--card); border-radius: 28px; padding: 10px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 4px;">
         {#each SECTIONS as label, i}
           <button type="button" aria-current={sec === i ? 'page' : 'false'} onclick={() => (sec = i)} style="height: 44px; padding: 0 16px; border: 0; border-radius: 16px; cursor: pointer; text-align: left; background: {sec === i ? 'var(--tint)' : 'transparent'}; color: {sec === i ? 'var(--label)' : 'var(--text)'}; font-size: 15px; font-weight: 800;">{label}</button>
         {/each}
@@ -119,35 +141,39 @@
 
       <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
         {#if error}
-          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{error}</p>
+          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{error}</p>
         {/if}
 
         {#key sec}
-        <section class="fade-in" aria-label={SECTIONS[sec]} style="background: #ffffff; border-radius: 28px; padding: 6px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10);">
+        <section class="fade-in" aria-label={SECTIONS[sec]} style="background: var(--card); border-radius: 28px; padding: 6px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10);">
           <h2 style="margin: 16px 0 4px; font-size: 18px; font-weight: 800;">{SECTIONS[sec]}</h2>
 
           {#if sec === 0}
             {#snippet launcherLanguage()}{@render choice(t('Langue du launcher'), 'language', LAUNCHER_LANGUAGE)}{/snippet}
+            {#snippet appearance()}{@render choice(t('Apparence'), 'appearance', APPEARANCES)}{/snippet}
             {#snippet versionLink()}{@render action(t('Changer'), () => (location.hash = '#/Versions'))}{/snippet}
             {#snippet autostart()}{@render toggle(t('Ouvrir au démarrage de l’ordinateur'), 'autostart')}{/snippet}
             {#snippet minimize()}{@render toggle(t('Réduire pendant la partie'), 'minimizeInGame')}{/snippet}
             {#snippet discord()}{@render toggle(t('Afficher la partie sur Discord'), 'discordPresence')}{/snippet}
             {@render row(t('Langue du launcher'), t('Automatique suit la langue de l’ordinateur'), launcherLanguage)}
+            {@render row(t('Apparence'), t('Sombre repose les yeux le soir ; Système suit le mode clair ou sombre de l’ordinateur'), appearance)}
             {@render row(t('Version'), t('{version} : elle décide du jeu et du thème du launcher', { version: local(activeVersion()?.name) ?? t('Wii Party d’origine') }), versionLink)}
             {@render row(t('Ouvrir au démarrage de l’ordinateur'), t('Le launcher s’ouvre quand tu allumes l’ordinateur'), autostart)}
             {@render row(t('Réduire pendant la partie'), t('Le launcher se range dans la barre des tâches et revient à la fin'), minimize)}
-            {@render row(t('Afficher la partie sur Discord'), t('Tes amis voient si tu es dans le launcher, dans quel mode et à quel mini-jeu tu joues'), discord, true)}
+            {@render row(t('Afficher la partie sur Discord'), t('Tes amis voient si tu es dans le launcher, dans quel mode et à quel mini-jeu tu joues, et sur le plateau les cases, pièces, photos ou points de chacun'), discord, true)}
           {:else if sec === 1}
             {#snippet iso()}{@render action(settings.iso ? t('Changer') : t('Choisir'), changeIso)}{/snippet}
             {#snippet always()}{@render toggle(t('Toujours utiliser cet ISO'), 'alwaysUseIso')}{/snippet}
             {#snippet verify()}{@render toggle(t('Vérifier l’ISO à chaque lancement'), 'verifyIso')}{/snippet}
             {#snippet full()}{@render choice(t('Affichage du jeu'), 'windowMode', WINDOW_MODES)}{/snippet}
-            {#snippet language()}{@render choice(t('Langue du jeu'), 'gameLanguage', LANGUAGES)}{/snippet}
+            {#snippet language()}{@render choice(t('Langue du jeu'), 'consoleLanguage', LANGUAGES)}{/snippet}
+            {#snippet dolphin()}<Select label={t('Dossier de Dolphin')} value={settings.dolphinUser} options={DOLPHIN_FOLDERS} onchange={chooseDolphin} />{/snippet}
             {@render row(t('ISO de Wii Party'), settings.iso ? `${settings.iso.path} · ${settings.iso.country}` : t('Aucun ISO choisi pour l’instant'), iso)}
             {@render row(t('Toujours utiliser cet ISO'), t('Jouer lance directement le jeu, sans repasser par le choix de l’ISO'), always)}
             {@render row(t('Vérifier l’ISO à chaque lancement'), t('Quelques secondes pour éviter de lancer une copie abîmée'), verify)}
+            {@render row(t('Dossier de Dolphin'), dolphinInfo, dolphin)}
             {@render row(t('Affichage du jeu'), t('Plein écran fenêtré : sur tout l’écran, mais on passe d’une fenêtre à l’autre sans attendre'), full)}
-            {@render row(t('Langue du jeu'), t('Si le disque la contient (ta version peut en proposer moins)'), language, true)}
+            {@render row(t('Langue du jeu'), t('Automatique suit la langue de l’ordinateur, si le disque la contient (ta version peut en proposer moins)'), language, true)}
           {:else if sec === 2}
             {#snippet resolution()}{@render choice(t('Résolution interne'), 'resolution', RESOLUTIONS)}{/snippet}
             {#snippet aspect()}{@render choice(t('Format d’image'), 'aspect', ASPECTS)}{/snippet}
@@ -164,7 +190,9 @@
                 <span style="width: 46px; text-align: right; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums;">{t('{level} %', { level: settings.volume })}</span>
               </span>
             {/snippet}
-            {@render row(t('Volume du jeu'), settings.volume === 0 ? t('Coupé') : t('Le son de la partie'), volume, true)}
+            {#snippet sound()}{@render choice(t('Sortie audio'), 'soundMode', SOUND_MODES)}{/snippet}
+            {@render row(t('Volume du jeu'), settings.volume === 0 ? t('Coupé') : t('Le son de la partie'), volume)}
+            {@render row(t('Sortie audio'), settings.soundMode === 2 ? t('Dolby Pro Logic II, décodé en 5.1 : il faut des enceintes surround (demande un peu plus au processeur)') : t('Le réglage son de la Wii'), sound, true)}
           {:else if sec === 4}
             {#snippet open()}{@render action(t('Ouvrir'), () => openFolder('mods'))}{/snippet}
             {@render row(t('Dossier des mods'), folders ? `${folders.mods} · ${mods.list.length ? plural(mods.list.length, '{n} mod', '{n} mods') : t('vide')}` : t('Disponible dans l’application de bureau'), open, true)}

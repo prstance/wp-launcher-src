@@ -65,7 +65,7 @@
     border: 0;
     border-radius: 9px;
     cursor: pointer;
-    background: #ffffff;
+    background: var(--card);
     font-size: 18px;
     font-weight: 800;
     color: var(--text);
@@ -90,11 +90,11 @@
     color: var(--text);
   }
   .number:hover:not(:disabled) {
-    background: #ffffff;
+    background: var(--card);
   }
   .number:focus {
     outline: none;
     border-color: var(--accent);
-    background: #ffffff;
+    background: var(--card);
   }
 </style>

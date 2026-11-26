@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""Turns a Riivolution package (zip, folder or older package) into a .wpmod: the same files with
-a mod.json. With an --out ending in .wpver and a --theme, it makes a version: a version.json instead.
-
-  scripts/make-wpmod.py paquet.zip --id auteur.mon-mod --name "Mon mod" --version 1.0.0 \
-      --game SUPP01 --out "Mon-mod-1.0.0.wpmod"
-
-  scripts/make-wpmod.py Mode-Hiver.wpmod --id prstance.mode-hiver --name "Mode Hiver" --version 2026.11.5 \
-      --game SUPP01 --theme themes/mode-hiver --out src-tauri/versions/Mode-Hiver-2026.11.5.wpver
-
-Every XML of riivolution/ goes in the manifest, with the first choice of each of its options, except
-those that a setting of --manifest picks.
-
-With --disc (the original disc image, any format dolphin-tool reads), every file of the package that
-replaces one of the disc's becomes a delta against it (src-tauri/src/delta.rs): the package then
-carries none of the game's files, and the launcher makes them again from the player's disc before
-the first launch. It needs dolphin-tool from the fork (sys/main.dol) and cargo, for
-src-tauri/examples/wpdelta.rs.
-"""
-
 import argparse
 import json
 import os
@@ -39,7 +20,7 @@ def patches_of(root):
         ]
         patches.append({"type": "riivolution", "xml": xml.relative_to(root).as_posix(), "options": options})
     if not patches:
-        sys.exit(f"aucun XML dans {root / 'riivolution'}")
+        sys.exit(f"no XML in {root / 'riivolution'}")
     return patches
 
 

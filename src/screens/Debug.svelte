@@ -69,12 +69,12 @@
     {:else}
       <div class="fade-in" style="flex-grow: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; padding-bottom: 24px;">
         {#if error}
-          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424; overflow-wrap: anywhere;">{error}</p>
+          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger); overflow-wrap: anywhere;">{error}</p>
         {/if}
         <Notes notes={state.problems} />
 
         {#each state.groups as group (group.id)}
-          <section style="background: #ffffff; border-radius: 28px; padding: 18px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 8px;">
+          <section style="background: var(--card); border-radius: 28px; padding: 18px 24px; box-shadow: 0 6px 0 rgba(var(--shadow),0.10); display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; align-items: center; gap: 12px;">
               <h2 style="flex-grow: 1; margin: 0; font-size: 18px; font-weight: 800;">{local(group.name)}</h2>
               <button type="button" onclick={() => save(group, {})} disabled={busy || isDefault(group)} style="flex-shrink: 0; height: 34px; padding: 0 14px; border: 0; border-radius: 999px; cursor: pointer; background: var(--surface); font-size: 13px; font-weight: 800; color: var(--text);">{t('Tout désactiver')}</button>

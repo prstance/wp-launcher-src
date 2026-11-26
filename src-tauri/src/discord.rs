@@ -1,6 +1,7 @@
 //! Discord's Rich Presence: what the player's friends see on their profile, from
 //! the launcher down to the minigame being played ("Board Game Island", then
-//! "Minigame: Timber Topple"). Discord's local socket, or named pipe on Windows,
+//! "Minigame: Timber Topple"), and on the boards of three modes the players' numbers
+//! (spaces left, coins and photos, points). Discord's local socket, or named pipe on Windows,
 //! takes frames of JSON; without Discord, nothing is shown and nothing fails.
 
 use crate::i18n::{self, tr};
@@ -51,6 +52,8 @@ struct Now {
     playing: Option<(&'static str, u64)>,
     /// Where the game is, as our Dolphin tells.
     spot: Option<Spot>,
+    /// The players' numbers on the last board seen.
+    stats: Option<Stats>,
     /// The names of the game modes and of the minigames, by id, once read.
     modes: BTreeMap<i32, String>,
     minigames: BTreeMap<i32, String>,
@@ -78,6 +81,92 @@ impl Spot {
     }
 }
 
+/// Board Game Island, Globe Trot and Swap Meet, by their id in the save block, and the REL of
+/// their board.
+const BOARD_GAME_ISLAND: i32 = 0;
+const GLOBE_TROT: i32 = 3;
+const SWAP_MEET: i32 = 4;
+const BOARDS: [(i32, &str); 3] = [(BOARD_GAME_ISLAND, "mr001"), (GLOBE_TROT, "mr031"), (SWAP_MEET, "mr041")];
+
+/// The players' numbers on a board, as our Dolphin tells them (WPGameState.h in the fork):
+/// "wp-stats <mode> <round> <rounds> <player>…", a player being "h" (human) or "c" (CPU)
+/// then its numbers after ':'.
+#[derive(Clone, PartialEq, Debug)]
+struct Stats {
+    mode: i32,
+    round: i32,
+    /// None: the mode has no set number of rounds (Board Game Island is a race).
+    rounds: Option<i32>,
+    players: Vec<Player>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct Player {
+    human: bool,
+    numbers: Vec<i32>,
+}
+
+impl Stats {
+    fn parse(line: &str) -> Option<Stats> {
+        let mut words = line.strip_prefix("wp-stats ")?.split(' ');
+        let mut number = || words.next()?.parse::<i32>().ok();
+        let (mode, round, rounds) = (number()?, number()?, number()?);
+        let players = words
+            .map(|word| {
+                let mut parts = word.split(':');
+                let human = match parts.next()? {
+                    "h" => true,
+                    "c" => false,
+                    _ => return None,
+                };
+                Some(Player { human, numbers: parts.map(str::parse).collect::<Result<_, _>>().ok()? })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let wanted = match mode {
+            BOARD_GAME_ISLAND | GLOBE_TROT => 3,
+            SWAP_MEET => 1,
+            _ => return None,
+        };
+        let fits = !players.is_empty() && players.len() <= 4 && players.iter().all(|p| p.numbers.len() == wanted);
+        fits.then_some(Stats { mode, round, rounds: (rounds > 0).then_some(rounds), players })
+    }
+
+    /// Discord's details: "Board Game Island · Round 5", or "· Round 2/3".
+    fn round_text(&self) -> String {
+        match self.rounds {
+            Some(rounds) => tr!("Tour {n}/{max}", n = self.round, max = rounds),
+            None => tr!("Tour {n}", n = self.round),
+        }
+    }
+
+    /// Discord's state, one word per player: "P1 12 · P2 🌋 8 · P3 🏁 · P4 15"; Discord takes
+    /// 128 characters at most.
+    fn players_text(&self) -> String {
+        let each = self.players.iter().enumerate().map(|(i, p)| {
+            let who = tr!("J{n}", n = i + 1);
+            let n = &p.numbers;
+            match self.mode {
+                BOARD_GAME_ISLAND if n[2] != 0 => format!("{who} 🏁"),
+                BOARD_GAME_ISLAND if n[1] != 0 => format!("{who} 🌋 {}", n[0]),
+                BOARD_GAME_ISLAND => format!("{who} {}", n[0]),
+                GLOBE_TROT => format!("{who} 💰{} 📷{}{}", n[0], n[1], if n[2] > 0 { " 💤" } else { "" }),
+                _ => tr!("{who} {n} pts", who = who, n = n[0]),
+            }
+        });
+        let list = each.collect::<Vec<_>>().join(" · ");
+        let text = match self.mode {
+            BOARD_GAME_ISLAND => tr!("Cases restantes : {list}", list = list),
+            _ => list,
+        };
+        text.chars().take(128).collect()
+    }
+
+    /// The players in the game, and how many of them are people: Discord's party.
+    fn humans(&self) -> usize {
+        self.players.iter().filter(|p| p.human).count()
+    }
+}
+
 fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -100,6 +189,7 @@ pub fn playing(app: &AppHandle, title: &'static str) {
     with_now(app, |now| {
         now.playing = Some((title, unix_now()));
         now.spot = None;
+        now.stats = None;
     });
     refresh(app);
     if title != "game" {
@@ -119,8 +209,21 @@ pub fn playing(app: &AppHandle, title: &'static str) {
     });
 }
 
-/// A line of Dolphin's output: where the game now is, if it tells.
+/// A line of Dolphin's output: where the game now is, or the players' numbers, if it tells.
 pub fn report(app: &AppHandle, line: &str) {
+    if let Some(stats) = Stats::parse(line) {
+        let changed = with_now(app, |now| {
+            let changed = now.playing.is_some() && now.stats.as_ref() != Some(&stats);
+            if changed {
+                now.stats = Some(stats);
+            }
+            changed
+        });
+        if changed {
+            refresh(app);
+        }
+        return;
+    }
     let Some(spot) = Spot::parse(line) else { return };
     let moved = with_now(app, |now| {
         let moved = now.playing.is_some() && now.spot.as_ref() != Some(&spot);
@@ -138,6 +241,7 @@ pub fn stopped(app: &AppHandle) {
     with_now(app, |now| {
         now.playing = None;
         now.spot = None;
+        now.stats = None;
     });
     refresh(app);
 }
@@ -162,6 +266,9 @@ pub fn refresh(app: &AppHandle) {
     if let Some(state) = state {
         activity["state"] = state.into();
     }
+    if let Some(stats) = board_stats(&now).filter(|s| s.humans() > 0) {
+        activity["party"] = json!({ "size": [stats.humans(), stats.players.len()] });
+    }
     presence.wanted.send_replace(Some(activity));
 }
 
@@ -179,8 +286,16 @@ fn summary(app: &AppHandle, settings: &Settings) -> String {
     format!("{version} · {mods}")
 }
 
+/// The players' numbers, while the game is on their mode's board.
+fn board_stats(now: &Now) -> Option<&Stats> {
+    let (spot, stats) = (now.spot.as_ref()?, now.stats.as_ref()?);
+    let board = BOARDS.iter().any(|&(mode, scene)| mode == stats.mode && spot.mode == mode && spot.scene == scene);
+    board.then_some(stats)
+}
+
 /// Where the player is, from the widest to the narrowest: the launcher, the game's
-/// menu, a mode, a minigame. Discord's two lines: details, then state.
+/// menu, a mode and its players' numbers, a minigame. Discord's two lines: details,
+/// then state.
 fn place(now: &Now, summary: Option<&str>) -> (String, Option<String>) {
     match (now.playing, &now.spot) {
         (None, _) => (tr!("Dans le launcher"), None),
@@ -190,6 +305,10 @@ fn place(now: &Now, summary: Option<&str>) -> (String, Option<String>) {
         (Some(_), Some(spot)) if MENUS.contains(&spot.scene.as_str()) => (tr!("Menu principal"), summary.map(str::to_string)),
         (Some(_), Some(spot)) => {
             let mode = now.modes.get(&spot.mode).cloned();
+            if let Some(stats) = board_stats(now) {
+                let name = mode.unwrap_or_else(|| "Wii Party".to_string());
+                return (format!("{name} · {}", stats.round_text()), Some(stats.players_text()));
+            }
             if !spot.in_minigame() {
                 return (mode.unwrap_or_else(|| summary.unwrap_or("Wii Party").to_string()), summary.map(str::to_string));
             }
@@ -388,6 +507,35 @@ mod tests {
         now.spot = at("mg101", 101);
         assert_eq!(place(&now, Some("x")), ("Île aux défis".into(), Some(tr!("Mini-jeu : {name}", name = "Timber Topple"))));
         now.spot = at("mg447", 447);
+        assert_eq!(place(&now, Some("x")).1, Some(tr!("Dans un mini-jeu")));
+    }
+
+    #[test]
+    fn reads_the_players_numbers() {
+        let stats = Stats::parse("wp-stats 0 5 0 h:12:0:0 c:8:1:0 c:0:0:1 h:15:0:0").unwrap();
+        assert_eq!((stats.mode, stats.round, stats.rounds, stats.humans()), (0, 5, None, 2));
+        assert_eq!(stats.players_text(), tr!("Cases restantes : {list}", list = format!("{p1} 12 · {p2} 🌋 8 · {p3} 🏁 · {p4} 15", p1 = tr!("J{n}", n = 1), p2 = tr!("J{n}", n = 2), p3 = tr!("J{n}", n = 3), p4 = tr!("J{n}", n = 4))));
+        let trot = Stats::parse("wp-stats 3 2 10 h:120:3:0 h:80:2:1").unwrap();
+        assert_eq!(trot.rounds, Some(10));
+        assert!(trot.players_text().ends_with("💰80 📷2 💤"));
+        assert_eq!(Stats::parse("wp-stats 4 1 3 h:12 c:9").unwrap().players.len(), 2);
+        // A player short of numbers, a mode without any, or something else.
+        assert_eq!(Stats::parse("wp-stats 0 5 0 h:12:0"), None);
+        assert_eq!(Stats::parse("wp-stats 1 1 0 h:1"), None);
+        assert_eq!(Stats::parse("wp-state mr001 0 0"), None);
+    }
+
+    #[test]
+    fn shows_the_numbers_on_their_board_only() {
+        let mut now = Now { modes: [(0, "Île aux défis".to_string())].into(), ..Now::default() };
+        now.playing = Some(("game", 0));
+        now.stats = Stats::parse("wp-stats 0 5 0 h:12:0:0 c:8:1:0");
+        now.spot = Some(Spot { scene: "mr001".into(), mode: 0, minigame: 0 });
+        let (details, state) = place(&now, Some("x"));
+        assert_eq!(details, format!("Île aux défis · {}", tr!("Tour {n}", n = 5)));
+        assert!(state.unwrap().contains("🌋 8"));
+        // In a minigame, the minigame; the numbers come back with the board.
+        now.spot = Some(Spot { scene: "mg101".into(), mode: 0, minigame: 101 });
         assert_eq!(place(&now, Some("x")).1, Some(tr!("Dans un mini-jeu")));
     }
 

@@ -8,6 +8,7 @@
   import { game } from './lib/game.svelte.js';
   import { followLanguage, t } from './lib/i18n.svelte.js';
   import { settings } from './lib/settings.svelte.js';
+  import { followAppearance } from './lib/appearance.svelte.js';
 
   // Accueil draws its own window buttons in its header.
   const OWN_CONTROLS = ['Main'];
@@ -27,6 +28,7 @@
 
   onMount(startRemoteNav);
   onMount(followLanguage);
+  onMount(followAppearance);
 </script>
 
 <svelte:window bind:innerWidth={w} bind:innerHeight={h} />

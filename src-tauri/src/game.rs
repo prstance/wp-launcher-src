@@ -4,14 +4,17 @@ use crate::discord;
 use crate::i18n::tr;
 use crate::mii;
 use crate::mods;
+use crate::overlay;
 use crate::rebuild;
 use crate::settings::{self, Disc, Settings, Store};
 use crate::tools;
+use crate::versions;
 use crate::wiimote::Wiimotes;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::async_runtime::spawn;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -169,6 +172,100 @@ pub fn data_dir(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Dolphin's user folder for the game: the launcher's own, or the player's Dolphin's when they
+/// chose it (settings.dolphin_user), for its save, its Miis and the rest of its Wii.
+pub fn user_dir(app: &AppHandle, settings: &Settings) -> Result<PathBuf, String> {
+    match &settings.dolphin_user {
+        Some(dir) if Path::new(dir).is_dir() => Ok(PathBuf::from(dir)),
+        Some(dir) => Err(tr!("Le dossier de Dolphin choisi n’existe plus ({dir}) : choisis-en un autre dans Paramètres › Jeu et émulateur.", dir = dir)),
+        None => data_dir(app, "dolphin"),
+    }
+}
+
+/// Wii Party's titles ("SUP" and the region) in a Dolphin NAND, where its save is.
+const SAVE_TITLES: [&str; 4] = ["53555050", "53555045", "5355504a", "5355504b"];
+
+fn has_save(user: &Path) -> bool {
+    SAVE_TITLES.iter().any(|t| user.join("Wii/title/00010000").join(t).join("data").is_dir())
+}
+
+/// A Dolphin user folder holds a Wii: Dolphin made its NAND there.
+fn is_dolphin_folder(user: &Path) -> bool {
+    user.join("Wii").is_dir()
+}
+
+/// Where Dolphin keeps its user folder on this system, installed or as a Flatpak.
+fn known_dolphin_folders() -> Vec<PathBuf> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+    let mut found = Vec::new();
+    if cfg!(target_os = "linux") {
+        let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+        found.extend(data.map(|d| d.join("dolphin-emu")));
+        if let Some(h) = &home {
+            found.push(h.join(".var/app/org.DolphinEmu.dolphin-emu/data/dolphin-emu"));
+            found.push(h.join(".dolphin-emu"));
+        }
+    } else if cfg!(windows) {
+        found.extend(std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("Dolphin Emulator")));
+        if let Some(h) = &home {
+            found.push(h.join("Documents/Dolphin Emulator"));
+        }
+    } else if let Some(h) = &home {
+        found.push(h.join("Library/Application Support/Dolphin"));
+    }
+    found
+}
+
+#[derive(Serialize)]
+pub struct DolphinFolder {
+    path: String,
+    /// It has a save of Wii Party.
+    save: bool,
+}
+
+fn describe(user: &Path) -> DolphinFolder {
+    DolphinFolder { path: user.to_string_lossy().into_owned(), save: has_save(user) }
+}
+
+/// The player's own Dolphin folders found on this system, and the chosen one.
+#[tauri::command]
+pub fn dolphin_folders(app: AppHandle) -> Vec<DolphinFolder> {
+    let chosen = app.state::<Store>().get(&app).dolphin_user.map(PathBuf::from);
+    let mut folders: Vec<PathBuf> = known_dolphin_folders().into_iter().filter(|d| is_dolphin_folder(d)).collect();
+    if let Some(dir) = chosen.filter(|d| !folders.contains(d)) {
+        folders.push(dir);
+    }
+    folders.iter().map(|d| describe(d)).collect()
+}
+
+/// Plays in that Dolphin user folder (None: the launcher's own), once its Miis are in the library.
+#[tauri::command]
+pub fn dolphin_folder_set(app: AppHandle, path: Option<String>) -> Result<Settings, String> {
+    if is_playing(&app) {
+        return Err(tr!("Arrête la partie avant de changer de dossier Dolphin."));
+    }
+    if let Some(dir) = &path {
+        let user = Path::new(dir);
+        if !is_dolphin_folder(user) {
+            return Err(tr!("Ce n’est pas un dossier utilisateur de Dolphin : il n’a pas de dossier Wii. Lance une fois un jeu Wii avec ce Dolphin, ou choisis le dossier qui contient Wii, Config et GameSettings."));
+        }
+        mii::adopt_folder(&app, user)?;
+    }
+    let saved = app.state::<Store>().update(&app, |s| s.dolphin_user = path)?;
+    Ok(settings::for_ui(&app, saved))
+}
+
+/// The same through the folder picker; None when the player cancels.
+#[tauri::command]
+pub async fn dolphin_folder_pick(app: AppHandle) -> Result<Option<Settings>, String> {
+    let dialog = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.dialog().file().set_title(tr!("Choisis le dossier utilisateur de Dolphin")).blocking_pick_folder())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|f| f.into_path().ok()) else { return Ok(None) };
+    dolphin_folder_set(app, Some(path.to_string_lossy().into_owned())).map(Some)
+}
+
 /// Full check of the image: Ok(false) when it has problems (a modded image can too).
 async fn verify(app: &AppHandle, iso: &str) -> Result<bool, String> {
     let scratch = data_dir(app, "verify")?;
@@ -199,7 +296,11 @@ fn dolphin_args(s: &Settings, iso: &str, user: &Path) -> Vec<String> {
         // Bluetooth scanners are off): it picks up a remote back in its slot at once.
         "Dolphin.Core.WiimoteContinuousScanning=True".to_string(),
         "Dolphin.Interface.ConfirmStop=False".to_string(),
-        format!("SYSCONF.IPL.LNG={}", s.game_language),
+        format!("SYSCONF.IPL.LNG={}", s.console_language.unwrap_or_else(crate::i18n::console_language)),
+        format!("SYSCONF.IPL.SND={}", s.sound_mode.min(2)),
+        // Surround: the game mixes Dolby Pro Logic II, which only Dolphin's LLE DSP can decode to 5.1.
+        format!("Dolphin.Core.DPL2Decoder={}", bool_text(s.sound_mode == 2)),
+        format!("Dolphin.Core.DSPHLE={}", bool_text(s.sound_mode != 2)),
         // Where the game expects the bar's dots: 1 on top of the screen, 0 below it.
         format!("SYSCONF.BT.BAR={}", s.sensor_bar_top as u8),
         format!("Graphics.Settings.InternalResolution={}", s.resolution),
@@ -227,7 +328,7 @@ fn last_log_line(log: &Path) -> Option<String> {
     text.lines().rev().find(|l| !l.trim().is_empty() && !l.contains("no version information")).map(str::to_string)
 }
 
-async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool) {
+async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool, look: Option<serde_json::Value>) {
     if !Path::new(&disc.path).is_file() {
         set_state(&app, "error", Some(tr!("L’ISO n’est plus à cet endroit. Choisis-le à nouveau.")));
         return;
@@ -272,17 +373,20 @@ async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool) {
     if let Err(e) = mii::write_nand(&app) {
         eprintln!("Mii: {e}");
     }
-    if let Err(e) = play(&app, &boot, &settings).await {
+    if let Err(e) = play(&app, &boot, &settings, look).await {
         set_state(&app, "error", Some(e));
     } else {
         set_state(&app, "idle", None);
     }
 }
 
-async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), String> {
+/// `look`: the page's colours and the loading screen's texts (overlay.rs).
+async fn play(app: &AppHandle, boot: &str, settings: &Settings, look: Option<serde_json::Value>) -> Result<(), String> {
     let (_, dolphin) = tools::find(app, "dolphin").ok_or_else(|| tr!("Dolphin est absent de ce build du launcher."))?;
-    let user = data_dir(app, "dolphin")?;
-    let log = user.join("launcher-dolphin.log");
+    let user = user_dir(app, settings)?;
+    // In the launcher's own folder, even when Dolphin plays in the player's.
+    let dir = data_dir(app, "dolphin")?;
+    let log = dir.join("launcher-dolphin.log");
     let out = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
 
@@ -294,12 +398,17 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     if nvidia_present() {
         cmd.envs(NVIDIA_OFFLOAD);
     }
+    // Through the bridge, the game's speaker sound can reach the phones (Dolphin's option is
+    // for real remotes, whose Bluetooth can't carry it: the bridge keeps it from them).
     if let Some(bridge) = bridge {
         cmd.env(WIIMOTE_BRIDGE, bridge);
+        cmd.args(["-C", "Dolphin.Core.WiimoteEnableSpeaker=True"]);
     }
     let spawned = cmd
         .env(GAME_STATE, "1")
+        .env(overlay::ENV, overlay::env(&dir, look))
         .args(dolphin_args(settings, boot, &user))
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(err))
         .kill_on_drop(true)
@@ -311,7 +420,26 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
             return Err(tr!("Impossible de démarrer Dolphin : {e}", e = e));
         }
     };
-    let follower = child.stdout.take().map(|stdout| spawn(follow(app.clone(), stdout, out)));
+    // "game" or "miis".
+    let title = app.state::<Game>().state.lock().unwrap().title;
+    let packages = if title == "game" { mods::launch_packages(app, settings).unwrap_or_default() } else { Vec::new() };
+    let roots = mods::patch_roots(app, &packages);
+    let follower = child.stdout.take().map(|stdout| spawn(follow(app.clone(), stdout, out, roots)));
+    if let Some(stdin) = child.stdin.take() {
+        overlay::attach(app, stdin);
+    }
+    // Shown once the game's first screen is there.
+    if title == "game" {
+        let version = versions::active(app, settings).ok().flatten().map(|v| (v.manifest.name.to_string(), v.manifest.version));
+        let names: Vec<String> = settings.enabled_mods.iter().filter_map(|id| packages.iter().find(|m| &m.manifest.id == id)).map(|m| m.manifest.name.to_string()).collect();
+        if let Some(toast) = overlay::mods(version, &names) {
+            overlay::toast(app, &toast);
+        }
+    }
+    if let Some(toast) = overlay::players(&wiimotes.players().await) {
+        overlay::toast(app, &toast);
+    }
+    let watchers = [spawn(watch_saves(app.clone(), user.clone())), spawn(remind_pauses(app.clone(), title))];
 
     let window = app.get_webview_window("main");
     if settings.minimize_in_game {
@@ -322,7 +450,6 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     let (tx, rx) = oneshot::channel();
     *app.state::<Game>().stop.lock().unwrap() = Some(tx);
     set_state(app, "running", None);
-    let title = app.state::<Game>().state.lock().unwrap().title;
     discord::playing(app, title);
 
     let status = tokio::select! {
@@ -331,6 +458,10 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
     };
 
     *app.state::<Game>().stop.lock().unwrap() = None;
+    for watcher in &watchers {
+        watcher.abort();
+    }
+    overlay::detach(app);
     discord::stopped(app);
     // Its last lines, in the log before it's read.
     if let Some(follower) = follower {
@@ -355,21 +486,80 @@ async fn play(app: &AppHandle, boot: &str, settings: &Settings) -> Result<(), St
 
 /// Dolphin's output, into its log; our build's lines on where the game is also go
 /// to Discord. Not all of it is UTF-8, and all of it must be read, or Dolphin waits.
-async fn follow(app: AppHandle, stdout: ChildStdout, mut log: std::fs::File) {
+/// `roots`: the packages' folders and names (mods::patch_roots), for the patches it couldn't apply.
+async fn follow(app: AppHandle, stdout: ChildStdout, mut log: std::fs::File, roots: Vec<(String, String)>) {
     use std::io::Write;
     let mut stdout = BufReader::new(stdout);
     let mut line = Vec::new();
+    // Those of the patches skipped so far, said together a moment after the first.
+    let skipped: Arc<Mutex<Option<BTreeSet<String>>>> = Arc::default();
     while stdout.read_until(b'\n', &mut line).await.is_ok_and(|n| n > 0) {
         let _ = log.write_all(&line);
-        discord::report(&app, String::from_utf8_lossy(&line).trim_end());
+        let text = String::from_utf8_lossy(&line);
+        let text = text.trim_end();
+        // wp-patch-skipped <address> <folder>
+        if let Some((_, root)) = text.strip_prefix("wp-patch-skipped ").and_then(|rest| rest.split_once(' ')) {
+            let same = |a: &str, b: &str| a.replace('\\', "/").trim_end_matches('/') == b.replace('\\', "/").trim_end_matches('/');
+            let name = roots.iter().find(|(r, _)| same(r, root)).map(|(_, name)| name.clone());
+            let mut names = skipped.lock().unwrap();
+            if names.is_none() {
+                let (app, skipped) = (app.clone(), skipped.clone());
+                spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    let names: Vec<String> = skipped.lock().unwrap().take().unwrap_or_default().into_iter().collect();
+                    overlay::toast(&app, &overlay::patches_skipped(&names));
+                });
+            }
+            names.get_or_insert_with(BTreeSet::new).extend(name);
+        } else {
+            discord::report(&app, text);
+        }
         line.clear();
+    }
+}
+
+/// Says when the game writes its save in the NAND (Wii/title/00010000/<SUPP or SUPE>/data of
+/// Dolphin's user folder), at most every few seconds: it writes several times in a row.
+async fn watch_saves(app: AppHandle, user: PathBuf) {
+    const EVERY: Duration = Duration::from_secs(2);
+    const QUIET: Duration = Duration::from_secs(10);
+    // The game reads it at boot; only a new save is said this early.
+    const BOOT: Duration = Duration::from_secs(15);
+    let dirs = ["53555050", "53555045"].map(|id| user.join("Wii").join("title").join("00010000").join(id).join("data"));
+    let latest = || dirs.iter().filter_map(|d| std::fs::read_dir(d).ok()).flatten().flatten().filter_map(|e| e.metadata().ok()?.modified().ok()).max();
+    let start = Instant::now();
+    let mut last = latest();
+    let mut said: Option<Instant> = None;
+    loop {
+        tokio::time::sleep(EVERY).await;
+        let now = latest();
+        if now <= last {
+            continue;
+        }
+        let created = last.is_none();
+        last = now;
+        if (created || start.elapsed() >= BOOT) && said.is_none_or(|t| t.elapsed() >= QUIET) {
+            said = Some(Instant::now());
+            overlay::toast(&app, &overlay::saved(created));
+        }
+    }
+}
+
+/// Every hour of the game, a word about a break (not in the Mii Channel).
+async fn remind_pauses(app: AppHandle, title: &'static str) {
+    if title != "game" {
+        return;
+    }
+    for hours in 1.. {
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        overlay::toast(&app, &overlay::pause(hours));
     }
 }
 
 /// Starts the game with the current image. `force` skips the image check, once
 /// the player has decided to go on despite its problems.
 #[tauri::command]
-pub async fn game_launch(app: AppHandle, force: bool) -> Result<(), String> {
+pub async fn game_launch(app: AppHandle, force: bool, look: Option<serde_json::Value>) -> Result<(), String> {
     if !app.state::<Wiimotes>().has_player().await {
         return Err(tr!("Connecte au moins une Wiimote avant de lancer le jeu."));
     }
@@ -377,13 +567,13 @@ pub async fn game_launch(app: AppHandle, force: bool) -> Result<(), String> {
     let disc = settings.iso.clone().ok_or_else(|| tr!("Choisis d’abord ton ISO de Wii Party."))?;
     let first = if settings.verify_iso && !force { "verifying" } else { "running" };
     begin(&app, "game", first)?;
-    spawn(run(app, disc, settings, force));
+    spawn(run(app, disc, settings, force, look));
     Ok(())
 }
 
 /// The Mii Channel, from the disc's update partition, with the library in its
 /// database; what's made there comes back to the library when it closes.
-pub async fn open_mii_channel(app: AppHandle) -> Result<(), String> {
+pub async fn open_mii_channel(app: AppHandle, look: Option<serde_json::Value>) -> Result<(), String> {
     if !app.state::<Wiimotes>().has_player().await {
         return Err(tr!("Connecte au moins une Wiimote : la Chaîne Mii se joue en pointant l’écran."));
     }
@@ -395,7 +585,7 @@ pub async fn open_mii_channel(app: AppHandle) -> Result<(), String> {
             let wad = mii::disc::channel_wad(&app, &disc).await?;
             mii::write_nand(&app)?;
             spawn(close_after_save(app.clone()));
-            play(&app, &wad.to_string_lossy(), &settings).await
+            play(&app, &wad.to_string_lossy(), &settings, look).await
         }
         .await;
         let back = mii::read_nand(&app);
@@ -424,7 +614,9 @@ async fn close_after_save(app: AppHandle) {
             return;
         }
         if watch.saved(mii::nand_miis(&app), start.elapsed() < SETTLING) {
-            tokio::time::sleep(Duration::from_millis(1500)).await;
+            const CLOSING: u64 = 3;
+            overlay::toast(&app, &overlay::mii_saved(CLOSING));
+            tokio::time::sleep(Duration::from_secs(CLOSING)).await;
             game_stop(app.state::<Game>());
             return;
         }
@@ -478,8 +670,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn finds_wii_partys_save() {
+        let user = std::env::temp_dir().join(format!("wp-save-test-{}", std::process::id()));
+        std::fs::create_dir_all(user.join("Wii/title/00010000/53555050")).unwrap();
+        assert!(is_dolphin_folder(&user) && !has_save(&user));
+        std::fs::create_dir_all(user.join("Wii/title/00010000/53555050/data")).unwrap();
+        assert!(has_save(&user));
+        std::fs::remove_dir_all(&user).unwrap();
+    }
+
+    #[test]
     fn passes_settings_to_dolphin() {
-        let settings = Settings { window_mode: 2, resolution: 4, volume: 40, game_language: 4, sensor_bar_top: true, ..Default::default() };
+        let settings = Settings { window_mode: 2, resolution: 4, volume: 40, console_language: Some(4), sound_mode: 2, sensor_bar_top: true, ..Default::default() };
         let args = dolphin_args(&settings, "/jeux/wp.rvz", Path::new("/data/dolphin"));
         assert_eq!(args[..5], ["-b", "-u", "/data/dolphin", "-e", "/jeux/wp.rvz"]);
         for expected in [
@@ -487,6 +689,9 @@ mod tests {
             "Dolphin.DSP.Volume=40",
             "Dolphin.Core.WiimoteContinuousScanning=True",
             "SYSCONF.IPL.LNG=4",
+            "SYSCONF.IPL.SND=2",
+            "Dolphin.Core.DPL2Decoder=True",
+            "Dolphin.Core.DSPHLE=False",
             "SYSCONF.BT.BAR=1",
             "Graphics.Settings.InternalResolution=4",
             "Wiimote.Wiimote4.Source=2",

@@ -14,7 +14,9 @@ pub fn is_wiimote_name(name: &str) -> bool {
 }
 
 pub fn model(name: &str) -> &'static str {
-    if name.ends_with("-TR") {
+    if name == super::phone::NAME {
+        "phone"
+    } else if name.ends_with("-TR") {
         "Wiimote Plus"
     } else {
         "Wiimote"
@@ -288,7 +290,7 @@ impl Gyro {
     const HAND_STILL: u32 = 10;
     const HAND_AGREE: f32 = 16.0;
 
-    #[cfg_attr(not(unix), allow(dead_code))]
+    /// Its rest value is known: it can point.
     pub fn ready(&self) -> bool {
         self.bias.is_some()
     }

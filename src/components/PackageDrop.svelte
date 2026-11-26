@@ -23,5 +23,5 @@
     <span style="font-size: 18px; font-weight: 800;">{busy ? t('Un instant…') : dragging ? t('Lâche ici') : title}</span>
     <span style="font-size: 13px; font-weight: 700; color: var(--muted);">{hint}</span>
   </span>
-  <button type="button" onclick={onbrowse} disabled={busy} style="flex-shrink: 0; height: 40px; padding: 0 18px; border: 0; border-radius: 999px; cursor: pointer; background: #ffffff; font-size: 14px; font-weight: 800; color: var(--text);">{t('Parcourir')}</button>
+  <button type="button" onclick={onbrowse} disabled={busy} style="flex-shrink: 0; height: 40px; padding: 0 18px; border: 0; border-radius: 999px; cursor: pointer; background: var(--card); font-size: 14px; font-weight: 800; color: var(--text);">{t('Parcourir')}</button>
 </div>

@@ -3,7 +3,9 @@
 //! to it through a channel, and every change goes out as a `wiimotes://state` event.
 
 mod bridge;
+mod emulated;
 mod journal;
+mod phone;
 mod pointer;
 mod protocol;
 #[cfg(target_os = "linux")]
@@ -17,11 +19,12 @@ mod transport;
 mod transport;
 
 use crate::i18n::tr;
+use crate::overlay;
 use bridge::Proxy;
-use pointer::Pointer;
+use pointer::{Aim, Pointer};
 use protocol::Input;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,7 +32,7 @@ use tauri::async_runtime::{spawn, JoinHandle};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
-use transport::{Bluetooth, Discovery, Link};
+use transport::{Bluetooth, Discovery};
 
 const STATE_EVENT: &str = "wiimotes://state";
 /// J1 drives the launcher: where it points, and its button presses/releases.
@@ -45,6 +48,50 @@ const RETRY_AFTER: Duration = Duration::from_secs(5);
 /// A MotionPlus told to start that sends no data by then is told again, then taken for absent.
 const START_AGAIN_AFTER: Duration = Duration::from_secs(2);
 const START_GIVE_UP_AFTER: Duration = Duration::from_secs(5);
+
+/// A remote's connection: over Bluetooth, or a phone's emulated remote (phone.rs).
+pub enum Link {
+    Bluetooth(transport::Link),
+    Phone(phone::Link),
+}
+
+impl Link {
+    async fn send(&self, report: &[u8]) -> Result<(), String> {
+        match self {
+            // The game's speaker data, which Dolphin sends for the phones' speakers: a real
+            // remote only keeps its rumble bit, as Dolphin itself does with its speaker off
+            // (its Bluetooth can't carry sound without stuttering).
+            Link::Bluetooth(l) if report.get(1) == Some(&0x18) => l.send(&[protocol::OUT, 0x10, report[2] & 0x01]).await,
+            Link::Bluetooth(l) => l.send(report).await,
+            Link::Phone(l) => l.send(report).await,
+        }
+    }
+
+    async fn recv(&self, buf: &mut [u8]) -> Result<usize, String> {
+        match self {
+            Link::Bluetooth(l) => l.recv(buf).await,
+            Link::Phone(l) => l.recv(buf).await,
+        }
+    }
+
+    fn keep_connected(&self) {
+        if let Link::Bluetooth(l) = self {
+            l.keep_connected();
+        }
+    }
+
+    fn is_phone(&self) -> bool {
+        matches!(self, Link::Phone(_))
+    }
+
+    /// A status report's battery byte as a percentage; a phone tells its own, if its browser can.
+    fn battery(&self, raw: u8) -> Option<u8> {
+        match self {
+            Link::Bluetooth(_) => Some(protocol::battery_percent(raw)),
+            Link::Phone(l) => l.battery(),
+        }
+    }
+}
 
 /// Why Bluetooth can't be used (what transports report from `open`).
 pub enum Availability {
@@ -68,6 +115,18 @@ pub struct Snapshot {
     slots: [Option<RemoteView>; SLOTS],
     /// Remotes the system's own Bluetooth/HID driver holds, unusable until released.
     system: Vec<SystemRemote>,
+    /// Phones can connect (settings.phone_remotes): where, or why they can't.
+    phones: Option<PhonesView>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct PhonesView {
+    url: Option<String>,
+    /// The address's QR code: an SVG path, `qr_size` modules wide.
+    qr: String,
+    qr_size: usize,
+    error: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -124,6 +183,8 @@ enum Msg {
     Lost { id: u64 },
     /// Where the sensor bar sits: on top of the screen, or below it.
     SetBar(bool),
+    /// Phones may connect, or not any more.
+    Phones(bool),
     Tick,
 }
 
@@ -150,6 +211,24 @@ impl Wiimotes {
 
     pub fn set_bar(&self, top: bool) {
         let _ = self.0.send(Msg::SetBar(top));
+    }
+
+    pub fn set_phones(&self, on: bool) {
+        let _ = self.0.send(Msg::Phones(on));
+    }
+
+    /// A phone opened the page: its remote takes a slot like one connected by Bluetooth.
+    fn adopt_phone(&self, addr: String, link: phone::Link) {
+        let _ = self.0.send(Msg::Connected { addr, name: phone::NAME.to_string(), link: Ok(Link::Phone(link)) });
+    }
+
+    /// Each place's remote, if one is there: its model and battery.
+    pub async fn players(&self) -> [Option<(&'static str, Option<u8>)>; SLOTS] {
+        let (tx, rx) = oneshot::channel();
+        if self.0.send(Msg::Get(tx)).is_err() {
+            return [None; SLOTS];
+        }
+        rx.await.map_or([None; SLOTS], |s| s.slots.map(|r| r.map(|r| (r.model, r.battery))))
     }
 
     /// Whether someone can play: a remote is connected. Where the launcher can't
@@ -216,6 +295,11 @@ struct Remote {
     /// once they are all out.
     setting_up: Vec<JoinHandle<()>>,
     battery: Option<u8>,
+    /// Its battery was said to be low in the game (overlay.rs).
+    low_said: bool,
+    /// In the game: what points and since when, and what the game's window last said of it.
+    aim_seen: Option<(Aim, Instant)>,
+    aim_said: Option<Aim>,
     extension: Option<&'static str>,
     buttons: u16,
     last_status: Instant,
@@ -243,6 +327,18 @@ impl Remote {
             }
         }
         self.buttons = buttons;
+    }
+
+    /// A status report's battery byte. In the game, a battery going low is said once.
+    fn read_battery(&mut self, app: &AppHandle, slot: usize, in_game: bool, raw: u8) {
+        self.battery = self.link.battery(raw);
+        let Some(level) = self.battery else { return };
+        if level >= overlay::RECOVERED {
+            self.low_said = false;
+        } else if level < overlay::LOW_BATTERY && in_game && !self.low_said {
+            self.low_said = true;
+            overlay::toast(app, &overlay::low_battery(slot, protocol::model(&self.name), level));
+        }
     }
 
     /// Keeps the game waiting until this task has sent its reports.
@@ -306,6 +402,9 @@ struct Manager {
     connecting: HashSet<String>,
     failed: HashMap<String, Instant>,
     system: Vec<SystemRemote>,
+    /// The phones' server (phone.rs) while they may connect, and what the UI shows of it
+    /// (or why it couldn't start).
+    phones: Option<(Option<phone::Server>, PhonesView)>,
     next_id: u64,
     ticks: u64,
     published: String,
@@ -335,6 +434,7 @@ impl Manager {
             connecting: HashSet::new(),
             failed: HashMap::new(),
             system: Vec::new(),
+            phones: None,
             next_id: 0,
             ticks: 0,
             published: String::new(),
@@ -376,10 +476,15 @@ impl Manager {
                 for (slot, r) in slots.iter_mut().enumerate() {
                     if let Some(r) = r {
                         r.set_buttons(app, slot == 0, 0);
+                        // The game's first notification shows it.
+                        r.low_said = r.battery.is_some_and(|b| b < overlay::LOW_BATTERY);
+                        (r.aim_seen, r.aim_said) = (None, None);
                     }
                 }
                 let _ = app.emit(POINTER_EVENT, PointerEvent { dots: Vec::new(), pos: None, source: None });
-                let supported = !matches!(self.bt, Err(Availability::Unsupported));
+                // Phones only go through the bridge, wherever the launcher can't drive Bluetooth.
+                let phones = self.slots.iter().flatten().any(|r| r.link.is_phone());
+                let supported = phones || !matches!(self.bt, Err(Availability::Unsupported));
                 self.listener = if supported { listen(self.tx.clone()) } else { None };
                 self.shared = self.listener.is_none();
                 if self.shared {
@@ -413,12 +518,35 @@ impl Manager {
                 }
             }
             Msg::Battery { id, raw } => {
-                if let Some(r) = self.slots.iter_mut().flatten().find(|r| r.id == id) {
-                    r.battery = Some(protocol::battery_percent(raw));
+                let (app, paused) = (&self.app, self.paused);
+                if let Some((slot, r)) = self.slots.iter_mut().enumerate().find_map(|(i, r)| r.as_mut().filter(|r| r.id == id).map(|r| (i, r))) {
+                    r.read_battery(app, slot, paused, raw);
+                }
+            }
+            Msg::Phones(true) if matches!(self.phones, Some((Some(_), _))) => {}
+            Msg::Phones(true) => {
+                self.phones = Some(match phone::start(&self.app, Wiimotes(self.tx.clone())).await {
+                    Ok(server) => {
+                        let (qr, qr_size) = phone::qr_path(&server.url);
+                        let view = PhonesView { url: Some(server.url.clone()), qr, qr_size, error: None };
+                        (Some(server), view)
+                    }
+                    Err(e) => (None, PhonesView { url: None, qr: String::new(), qr_size: 0, error: Some(e) }),
+                });
+            }
+            Msg::Phones(false) => {
+                self.phones = None;
+                // Their remotes go with the server.
+                for slot in self.slots.iter_mut() {
+                    if let Some(Link::Phone(l)) = slot.as_ref().map(|r| &*r.link) {
+                        l.close("stopped");
+                        *slot = None;
+                    }
                 }
             }
             Msg::Tick => {
                 self.ticks += 1;
+                self.watch_aims();
                 self.check_motion_plus().await;
                 self.refresh().await;
             }
@@ -488,11 +616,51 @@ impl Manager {
                     if slot.as_ref().is_some_and(|r| r.id == id) {
                         if let (true, Some(r)) = (self.paused, slot.take()) {
                             self.places.insert(r.addr.clone(), i);
+                            overlay::toast(&self.app, &overlay::remote_lost(i, protocol::model(&r.name)));
                         }
                         *slot = None;
                     }
                 }
             }
+        }
+    }
+
+    /// In the game, says when what points changes for a remote, once it has for a moment: the
+    /// bar found or gone, a MotionPlus to set down so it learns its rest, or that has. The players
+    /// it happens to together share a notification.
+    fn watch_aims(&mut self) {
+        /// How long a change lasts before it's said.
+        const STEADY: Duration = Duration::from_secs(2);
+        if !self.paused {
+            return;
+        }
+        let now = Instant::now();
+        let mut changes: BTreeMap<overlay::Aiming, Vec<(usize, &'static str)>> = BTreeMap::new();
+        for (slot, r) in self.slots.iter_mut().enumerate() {
+            let Some(r) = r else { continue };
+            let Some(aim) = r.lent.lock().unwrap().as_ref().and_then(|l| l.proxy.pointer.aim(now)) else { continue };
+            let since = match r.aim_seen {
+                Some((seen, since)) if seen == aim => since,
+                _ => {
+                    r.aim_seen = Some((aim, now));
+                    continue;
+                }
+            };
+            if now.duration_since(since) < STEADY || r.aim_said == Some(aim) {
+                continue;
+            }
+            let said = match (r.aim_said.replace(aim), aim) {
+                (_, Aim::Learning) => overlay::Aiming::Learning,
+                // As it was when the game started: nothing to say.
+                (None, _) => continue,
+                (Some(Aim::Learning), Aim::Gyro) => overlay::Aiming::Ready,
+                (_, Aim::Gyro) => overlay::Aiming::Gyro,
+                (_, Aim::Bar) => overlay::Aiming::Bar,
+            };
+            changes.entry(said).or_default().push((slot, protocol::model(&r.name)));
+        }
+        for (said, players) in changes {
+            overlay::toast(&self.app, &overlay::aiming(said, &players));
         }
     }
 
@@ -558,18 +726,31 @@ impl Manager {
         self.connecting.insert(addr.clone());
         let (bt, tx) = (bt.clone(), self.tx.clone());
         spawn(async move {
-            let link = bt.connect(&addr).await;
+            let link = bt.connect(&addr).await.map(Link::Bluetooth);
             let _ = tx.send(Msg::Connected { addr, name, link });
         });
     }
 
     async fn add(&mut self, addr: String, name: String, link: Link) {
+        // A phone back before its old connection was found dead: it takes its own place again.
+        if let Some(old) = self.slots.iter().position(|r| r.as_ref().is_some_and(|r| r.addr == addr)) {
+            self.slots[old] = None;
+            self.places.insert(addr.clone(), old);
+        }
         let place = self.places.remove(&addr).filter(|&i| self.slots[i].is_none());
         let returning = place.is_some();
-        let Some(slot) = place.or_else(|| self.slots.iter().position(Option::is_none)) else { return };
+        let Some(slot) = place.or_else(|| self.slots.iter().position(Option::is_none)) else {
+            if let Link::Phone(l) = link {
+                l.close("full");
+            }
+            return;
+        };
         let id = self.next_id;
         self.next_id += 1;
         let link = Arc::new(link);
+        if self.paused {
+            overlay::toast(&self.app, &overlay::remote_joined(slot, protocol::model(&name), returning));
+        }
 
         let lent: Arc<Mutex<Option<Lent>>> = Arc::default();
 
@@ -627,6 +808,9 @@ impl Manager {
             serving: None,
             setting_up: Vec::new(),
             battery: None,
+            low_said: false,
+            aim_seen: None,
+            aim_said: None,
             extension: None,
             buttons: 0,
             last_status: Instant::now(),
@@ -644,7 +828,7 @@ impl Manager {
 
     async fn input(&mut self, id: u64, report: &[u8]) {
         let Some(slot) = self.slots.iter().position(|r| r.as_ref().is_some_and(|r| r.id == id)) else { return };
-        let drives_ui = slot == 0 && !self.paused;
+        let (drives_ui, paused) = (slot == 0 && !self.paused, self.paused);
         let (app, Some(r)) = (&self.app, &mut self.slots[slot]) else { return };
         // Anything but data: status, read answers, write acknowledgements.
         if !matches!(report.get(1), Some(0x30..=0x3F)) {
@@ -659,14 +843,14 @@ impl Manager {
         if self.shared {
             if let Input::Status { buttons, battery, .. } = protocol::parse(report) {
                 r.buttons = buttons;
-                r.battery = Some(protocol::battery_percent(battery));
+                r.read_battery(app, slot, paused, battery);
             }
             return;
         }
         match protocol::parse(report) {
             Input::Status { buttons, extension, battery } => {
                 r.set_buttons(app, drives_ui, buttons);
-                r.battery = Some(protocol::battery_percent(battery));
+                r.read_battery(app, slot, paused, battery);
                 // A status report stops data reporting until the mode is set again.
                 let _ = r.link.send(&protocol::report_mode()).await;
                 if !extension {
@@ -812,6 +996,10 @@ impl Manager {
     fn park(&mut self) {
         for (slot, place) in self.slots.iter_mut().enumerate() {
             let Some(r) = place.take() else { continue };
+            // Dolphin can't open a phone itself: it goes.
+            if r.link.is_phone() {
+                continue;
+            }
             r.link.keep_connected();
             self.parked[slot] = Some(Parked { addr: r.addr.clone(), name: r.name.clone(), pointer: r.pointer.clone() });
         }
@@ -926,6 +1114,7 @@ impl Manager {
                 (None, None) => None,
             }),
             system: self.system.clone(),
+            phones: self.phones.as_ref().map(|(_, view)| view.clone()),
         }
     }
 

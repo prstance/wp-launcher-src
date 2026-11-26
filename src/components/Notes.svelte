@@ -36,16 +36,16 @@
     font-weight: 700;
   }
   .error {
-    background: #fde0e0;
-    color: #7a1424;
+    background: var(--danger-bg);
+    color: var(--danger);
   }
   .warning {
-    background: #f8e6c6;
-    color: #6b4100;
+    background: var(--warn-bg);
+    color: var(--warn);
   }
   .ok {
-    background: #d9f0dd;
-    color: #17532a;
+    background: var(--ok-bg);
+    color: var(--ok);
   }
   button {
     flex-shrink: 0;

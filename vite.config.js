@@ -6,6 +6,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
+  // The launcher, and the page a phone opens to be a Wii Remote (src/phone/).
+  build: {
+    rollupOptions: {
+      input: { main: "index.html", phone: "phone.html" },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

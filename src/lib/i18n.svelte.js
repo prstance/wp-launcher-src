@@ -13,11 +13,11 @@ export const LANGUAGES = [["fr", "Français"], ["en", "English"], ["es", "Españ
 
 const DICTIONARIES = { en, es };
 
+/** The computer's languages, most wanted first, as two-letter codes. */
+const WANTED = (navigator.languages?.length ? navigator.languages : [navigator.language ?? ""]).map((l) => l.slice(0, 2).toLowerCase());
+
 /** The system's language when the launcher has it, English otherwise. */
-const SYSTEM = (() => {
-  const wanted = (navigator.languages?.length ? navigator.languages : [navigator.language ?? ""]).map((l) => l.slice(0, 2).toLowerCase());
-  return wanted.find((l) => LANGUAGES.some(([code]) => code === l)) ?? "en";
-})();
+const SYSTEM = WANTED.find((l) => LANGUAGES.some(([code]) => code === l)) ?? "en";
 
 /** "fr", "en" or "es": settings.language, or the system's for "auto". */
 export const lang = () => (LANGUAGES.some(([code]) => code === settings.language) ? settings.language : SYSTEM);
@@ -42,14 +42,15 @@ export function local(text) {
   return text[lang()] ?? text.en ?? text.fr ?? Object.values(text)[0] ?? "";
 }
 
-/** Keeps the page's lang and the backend's messages (src-tauri/src/i18n.rs) in the launcher's language. */
+/** Keeps the page's lang and the backend's messages (src-tauri/src/i18n.rs) in the launcher's language;
+ *  the backend also learns the computer's languages, which the game speaks when set to automatic. */
 export function followLanguage() {
   return $effect.root(() => {
     $effect(() => {
       const code = lang();
       document.documentElement.lang = code;
       // The mods' problems are written by the backend: ask for them again.
-      if (inTauri) invoke("locale_set", { lang: code }).then(refreshMods, () => {});
+      if (inTauri) invoke("locale_set", { lang: code, system: WANTED }).then(refreshMods, () => {});
     });
   });
 }

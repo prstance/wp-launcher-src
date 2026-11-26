@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { inTauri } from "./tauri.js";
 import { refreshMods } from "./mods.svelte.js";
+import { isDark, onSchemeChange } from "./appearance.svelte.js";
 
 const COLORS_KEY = "wp-theme-colors";
 
@@ -12,14 +13,22 @@ export const versions = $state({ ready: !inTauri, list: [], error: null });
 /** What screens draw from the theme. Its colors go straight to the CSS variables. */
 export const theme = $state({ tagline: null, hero: [], home: [], library: [], modesOnly: false });
 
+/** What a theme still paints in dark mode: the rest is the dark colours of app.css. */
+const ACCENTS = ["accent", "accent-soft", "accent-deep", "grad-top", "grad-bottom", "dot"];
+
 let painted = [];
+let last = {};
 
 const paint = (colors) => {
+  last = colors;
   const style = document.documentElement.style;
   painted.forEach((name) => style.removeProperty(`--${name}`));
-  painted = Object.keys(colors);
-  Object.entries(colors).forEach(([name, value]) => style.setProperty(`--${name}`, value));
+  const shown = Object.entries(colors).filter(([name]) => !isDark() || ACCENTS.includes(name));
+  painted = shown.map(([name]) => name);
+  shown.forEach(([name, value]) => style.setProperty(`--${name}`, value));
 };
+
+onSchemeChange(() => paint(last));
 
 // The colors of last time, so that the launcher doesn't flash pink while it starts.
 try {

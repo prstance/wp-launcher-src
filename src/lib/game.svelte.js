@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "./tauri.js";
+import { gameOverlay } from "./overlay.js";
 
 /** phase: "idle" | "verifying" | "problems" | "preparing" | "running" | "error"
  *  title: what Dolphin runs, "game" or "miis" (the Mii Channel). */
@@ -13,6 +14,6 @@ if (inTauri) {
 }
 
 /** `force` goes on despite problems found in the ISO. */
-export const launch = (force = false) => invoke("game_launch", { force });
+export const launch = (force = false) => invoke("game_launch", { force, look: gameOverlay() });
 export const stop = () => invoke("game_stop");
 export const dismiss = () => invoke("game_dismiss");

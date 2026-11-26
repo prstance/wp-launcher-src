@@ -2,11 +2,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "./tauri.js";
+import { t } from "./i18n.svelte.js";
 
 /**
  * bluetooth: "loading" | "ready" | "off" | "none" | "unsupported" | "error"
  * slots: 4 × (null | { addr, model, battery, extension, buttons })
  * system: remotes held by the computer's own Bluetooth, [{ addr, model }]
+ * phones: null, or while phones can connect { url, qr (SVG path), qrSize, error }
+ * A slot's model: "Wiimote", "Wiimote Plus" or "phone".
  */
 export const wiimotes = $state({
   bluetooth: inTauri ? "loading" : "unsupported",
@@ -16,6 +19,7 @@ export const wiimotes = $state({
   connecting: 0,
   slots: [null, null, null, null],
   system: [],
+  phones: null,
 });
 
 if (inTauri) {
@@ -31,6 +35,9 @@ export const disconnect = (slot) => invoke("wiimote_disconnect", { slot });
 export const identify = (slot) => invoke("wiimote_identify", { slot });
 export const moveTo = (from, to) => invoke("wiimote_move", { from, to });
 export const release = (addr) => invoke("wiimote_release", { addr });
+
+/** A slot's model, for people. */
+export const modelName = (model) => (model === "phone" ? t("Téléphone") : model);
 
 /** Player colours, J1–J4: header, darker outline. */
 export const PLAYERS = [

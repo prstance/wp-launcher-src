@@ -115,17 +115,17 @@
 
 <div style="width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; background: var(--bg); font-family: 'M PLUS Rounded 1c', system-ui, sans-serif; color: var(--text);">
   <div aria-hidden="true" style="position: absolute; inset: 0; pointer-events: none;">
-    <div style="position: absolute; left: -180px; top: 300px; width: 620px; height: 620px; border-radius: 999px; border: 64px solid var(--tint); box-sizing: border-box;"></div>
-    <div style="position: absolute; left: 1040px; top: -200px; width: 420px; height: 420px; border-radius: 999px; border: 44px solid var(--tint); box-sizing: border-box;"></div>
+    <div style="position: absolute; left: -180px; top: 300px; width: 620px; height: 620px; border-radius: 999px; border: 64px solid var(--decor); box-sizing: border-box;"></div>
+    <div style="position: absolute; left: 1040px; top: -200px; width: 420px; height: 420px; border-radius: 999px; border: 44px solid var(--decor); box-sizing: border-box;"></div>
   </div>
   <div data-tauri-drag-region style="position: absolute; left: 0; right: 0; top: 0; height: 40px; z-index: 1;"></div>
 
   <main style="flex-grow: 1; position: relative; z-index: 1; display: flex; gap: 34px; padding: 44px 48px 36px 64px; min-width: 0;">
     <section aria-labelledby="welcome-title" style="width: 420px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; text-align: center;">
-      <h1 id="welcome-title" style="margin: 0; font-size: 64px; line-height: 70px; font-weight: 800; color: var(--accent); -webkit-text-stroke: 10px #ffffff; paint-order: stroke fill; text-shadow: 0 6px 0 rgba(var(--shadow),0.10);">{t('Bienvenue !')}</h1>
+      <h1 id="welcome-title" style="margin: 0; font-size: 64px; line-height: 70px; font-weight: 800; color: var(--accent); -webkit-text-stroke: 10px var(--title-stroke); paint-order: stroke fill; text-shadow: 0 6px 0 rgba(var(--shadow),0.10);">{t('Bienvenue !')}</h1>
       <p style="margin: 6px 0 0; max-width: 380px; font-size: 16px; line-height: 24px; font-weight: 600;">{t('Un pseudo et un Mii, et c’est parti. Tout se change plus tard dans « Mes Mii ».')}</p>
 
-      <div class="motion-float" style="margin-top: 22px; position: relative; width: 210px; height: 210px; border-radius: 999px; background: #ffffff; box-shadow: inset 0 -10px 0 {chosen?.color ?? 'var(--accent)'}40, 0 8px 0 rgba(var(--shadow),0.10), 0 20px 40px rgba(var(--shadow),0.16); display: flex; align-items: center; justify-content: center;">
+      <div class="motion-float" style="margin-top: 22px; position: relative; width: 210px; height: 210px; border-radius: 999px; background: var(--card); box-shadow: inset 0 -10px 0 {chosen?.color ?? 'var(--accent)'}40, 0 8px 0 rgba(var(--shadow),0.10), 0 20px 40px rgba(var(--shadow),0.16); display: flex; align-items: center; justify-content: center;">
         {#key chosen?.id}
           <span class="pop"><MiiHead mii={chosen} size={176} /></span>
         {/key}
@@ -133,16 +133,16 @@
 
       <label style="margin-top: 22px; width: 340px; display: flex; flex-direction: column; gap: 6px; text-align: left;">
         <span style="padding-left: 16px; font-size: 13px; font-weight: 800; color: var(--label);">{t('Ton pseudo')}</span>
-        <input bind:value={name} oninput={() => (named = true)} maxlength="10" spellcheck="false" placeholder={t('Ton pseudo')} style="height: 56px; padding: 0 22px; border: 0; border-radius: 999px; background: #ffffff; box-shadow: inset 0 0 0 3px var(--line), 0 4px 0 rgba(var(--shadow),0.08); font-size: 22px; font-weight: 800; color: var(--text); outline: none; text-align: center;">
+        <input bind:value={name} oninput={() => (named = true)} maxlength="10" spellcheck="false" placeholder={t('Ton pseudo')} style="height: 56px; padding: 0 22px; border: 0; border-radius: 999px; background: var(--card); box-shadow: inset 0 0 0 3px var(--line), 0 4px 0 rgba(var(--shadow),0.08); font-size: 22px; font-weight: 800; color: var(--text); outline: none; text-align: center;">
       </label>
 
       <button type="button" onclick={start} disabled={!ready} style="margin-top: 22px; display: inline-flex; align-items: center; gap: 12px; height: 64px; padding: 0 36px 0 18px; border: 0; border-radius: 999px; cursor: {ready ? 'pointer' : 'default'}; opacity: {ready ? 1 : 0.5}; background: linear-gradient(180deg,var(--grad-top) 0%,var(--grad-bottom) 58%); box-shadow: inset 0 4px 0 rgba(255,255,255,0.45), 0 5px 0 var(--accent-deep), 0 12px 22px rgba(var(--shadow),0.20);">
-        <span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 999px; background: #ffffff; border: 3px solid var(--text); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: var(--text);">A</span>
+        <span aria-hidden="true" style="width: 32px; height: 32px; border-radius: 999px; background: var(--card); border: 3px solid var(--text); box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; color: var(--text);">A</span>
         <span style="font-size: 26px; font-weight: 800; color: #ffffff; -webkit-text-stroke: 6px var(--accent-deep); paint-order: stroke fill;">{t('C’est parti !')}</span>
       </button>
     </section>
 
-    <section aria-labelledby="pick-title" style="flex-grow: 1; min-width: 0; background: {dragging ? 'var(--tint)' : '#ffffff'}; border-radius: 40px; padding: 26px 28px 22px; box-shadow: 0 12px 40px rgba(var(--shadow),0.14); display: flex; flex-direction: column; gap: 14px;">
+    <section aria-labelledby="pick-title" style="flex-grow: 1; min-width: 0; background: {dragging ? 'var(--tint)' : 'var(--card)'}; border-radius: 40px; padding: 26px 28px 22px; box-shadow: 0 12px 40px rgba(var(--shadow),0.14); display: flex; flex-direction: column; gap: 14px;">
       <header style="display: flex; align-items: center; justify-content: space-between; gap: 14px;">
         <h2 id="pick-title" style="margin: 0; font-size: 26px; font-weight: 800; color: var(--accent);">{t('Choisis ton Mii')}</h2>
         <nav aria-label={t('Sources')} style="display: flex; gap: 6px; padding: 5px; border-radius: 999px; background: var(--surface);">
@@ -171,16 +171,16 @@
         {:else if discMiis.loading && !discMiis.list.length}
           <p role="status" style="height: 100%; margin: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; color: var(--muted);">{t('Le launcher lit les Mii de ton disque…')}</p>
         {:else if discMiis.error}
-          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{discMiis.error}</p>
+          <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{discMiis.error}</p>
         {:else}
           <MiiPicker items={discItems} {selected} onpick={(k) => (selected = k)} size={58} label={t('Mii de Wii Party')} />
         {/if}
       </div>
 
       {#if error}
-        <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #fde0e0; font-size: 13px; font-weight: 700; color: #7a1424;">{error}</p>
+        <p role="alert" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--danger-bg); font-size: 13px; font-weight: 700; color: var(--danger);">{error}</p>
       {:else if notice}
-        <p role="status" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: #d9f0dd; font-size: 13px; font-weight: 700; color: #17532a;">{notice}</p>
+        <p role="status" style="margin: 0; padding: 10px 16px; border-radius: 16px; background: var(--ok-bg); font-size: 13px; font-weight: 700; color: var(--ok);">{notice}</p>
       {/if}
 
       <footer style="display: flex; gap: 12px;">

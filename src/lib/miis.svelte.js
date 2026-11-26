@@ -5,6 +5,7 @@ import { inTauri } from "./tauri.js";
 import { settings } from "./settings.svelte.js";
 import { wiimotes, hasPlayer, scan } from "./wiimotes.svelte.js";
 import { t } from "./i18n.svelte.js";
+import { overlay } from "./overlay.js";
 
 /** list: [{ id, name, creator, female, color, birthday, head }]. head: a PNG data URL,
  *  null until the face parts are taken from the ISO. faces: they are. */
@@ -78,7 +79,7 @@ export async function removeMii(id) {
 export const exportMii = (id) => invoke("miis_export", { id });
 
 /** Dolphin opens the Mii Channel; game.title is "miis" while it runs. */
-export const openMiiChannel = () => invoke("miis_channel");
+export const openMiiChannel = () => invoke("miis_channel", { look: overlay(t("Chaîne Mii"), t("Les Miis que tu y crées rejoignent la bibliothèque du launcher.")) });
 
 /** The Mii Channel button, which first connects a remote when there is none: the
  *  channel is played by pointing. { label, hint, enabled, run, waiting }: waiting
