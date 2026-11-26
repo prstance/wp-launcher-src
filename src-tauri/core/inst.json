@@ -25,5 +25,62 @@
   false,
   false
  ],
- "hooks": []
+ "hooks": [
+  {
+   "name": "Inst_rules",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "\u00e9cran des r\u00e8gles d'un mini-jeu construit (textes, pages modifiables)",
+   "header": "inst"
+  },
+  {
+   "name": "Inst_results",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "r\u00e9sultats d'un mini-jeu (rangs, scores, gains modifiables)",
+   "header": "inst"
+  },
+  {
+   "name": "Inst_retry",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "choix du menu \u00ab rejouer \u00bb apr\u00e8s les r\u00e9sultats",
+   "header": "inst"
+  },
+  {
+   "name": "Player_color",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleur d'un joueur (maillot, panneaux, mini-carte)",
+   "header": "mr001"
+  },
+  {
+   "name": "ScorePanel_digits",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chiffres du panneau \u00ab Reste : \u00bb et valeur maximale",
+   "header": "mr001"
+  },
+  {
+   "name": "ScorePanel_colored",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleurs du panneau \u00ab Reste : \u00bb d'un joueur",
+   "header": "mr001"
+  },
+  {
+   "name": "PlayerName_slot",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "place d'un joueur dans l'\u00e9cran des noms",
+   "header": "mr001"
+  },
+  {
+   "name": "MiiCharacter_body",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mod\u00e8le du corps d'un personnage",
+   "header": "mr001"
+  }
+ ]
 }

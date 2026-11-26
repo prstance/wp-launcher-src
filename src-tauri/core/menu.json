@@ -25,5 +25,69 @@
   false,
   false
  ],
- "hooks": []
+ "hooks": [
+  {
+   "name": "Menu_createPage",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "cr\u00e9ation d'une page du menu (page du mod)",
+   "header": "menu"
+  },
+  {
+   "name": "Menu_pageCreated",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "page du menu cr\u00e9\u00e9e (choix du mode, listes...)",
+   "header": "menu"
+  },
+  {
+   "name": "Menu_minigameList",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liste des mini-jeux du jeu libre (ordre, filtre)",
+   "header": "menu"
+  },
+  {
+   "name": "Menu_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "une partie va commencer depuis le menu (sc\u00e8ne modifiable)",
+   "header": "menu"
+  },
+  {
+   "name": "Player_color",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleur d'un joueur (maillot, panneaux, mini-carte)",
+   "header": "mr001"
+  },
+  {
+   "name": "ScorePanel_digits",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chiffres du panneau \u00ab Reste : \u00bb et valeur maximale",
+   "header": "mr001"
+  },
+  {
+   "name": "ScorePanel_colored",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleurs du panneau \u00ab Reste : \u00bb d'un joueur",
+   "header": "mr001"
+  },
+  {
+   "name": "PlayerName_slot",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "place d'un joueur dans l'\u00e9cran des noms",
+   "header": "mr001"
+  },
+  {
+   "name": "MiiCharacter_body",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mod\u00e8le du corps d'un personnage",
+   "header": "mr001"
+  }
+ ]
 }

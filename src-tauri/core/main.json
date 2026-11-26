@@ -1,0 +1,2104 @@
+{
+ "hooks": [
+  {
+   "name": "Minigame_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "un mini-jeu va \u00eatre construit (GameData modifiable)",
+   "header": "common",
+   "modules": [
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507"
+   ]
+  },
+  {
+   "name": "Minigame_ready",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mini-jeu construit, sa premi\u00e8re image",
+   "header": "common",
+   "modules": [
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507"
+   ]
+  },
+  {
+   "name": "Minigame_calc",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image d'un mini-jeu",
+   "header": "common",
+   "modules": [
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507"
+   ]
+  },
+  {
+   "name": "Minigame_end",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin d'un mini-jeu (r\u00e9sultats dans GameData, modifiables)",
+   "header": "common",
+   "modules": [
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507"
+   ]
+  },
+  {
+   "name": "Minigame_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin d'un mini-jeu (lib\u00e9rer ce que le mod a cr\u00e9\u00e9)",
+   "header": "common",
+   "modules": [
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507"
+   ]
+  },
+  {
+   "name": "Game_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but de la partie d'un mode",
+   "header": "common",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "Game_end",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin de la partie d'un mode",
+   "header": "common",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "Inst_rules",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "\u00e9cran des r\u00e8gles d'un mini-jeu construit (textes, pages modifiables)",
+   "header": "inst",
+   "modules": [
+    "inst"
+   ]
+  },
+  {
+   "name": "Inst_results",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "r\u00e9sultats d'un mini-jeu (rangs, scores, gains modifiables)",
+   "header": "inst",
+   "modules": [
+    "inst"
+   ]
+  },
+  {
+   "name": "Inst_retry",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "choix du menu \u00ab rejouer \u00bb apr\u00e8s les r\u00e9sultats",
+   "header": "inst",
+   "modules": [
+    "inst"
+   ]
+  },
+  {
+   "name": "Scene_load",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "une sc\u00e8ne (REL) va \u00eatre charg\u00e9e",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Scene_loaded",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "une sc\u00e8ne (REL) est charg\u00e9e, son prologue fait",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Scene_unloaded",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "une sc\u00e8ne (REL) est d\u00e9charg\u00e9e",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Main_calc",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image de la boucle principale (avant / apr\u00e8s les processus)",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Home_menu",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "menu HOME ouvert / ferm\u00e9",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Save_loaded",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "sauvegarde lue (blocs des mods \u00e0 reprendre)",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Save_store",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "le jeu va sauvegarder (remplir ses blocs)",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Model_mtxSet",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "matrice et \u00e9chelle d'un mod\u00e8le donn\u00e9es \u00e0 la sc\u00e8ne",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "MiiHead_anim",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "animation d'une t\u00eate de Mii (avant son clignement)",
+   "header": "main",
+   "modules": [
+    "main"
+   ]
+  },
+  {
+   "name": "Menu_createPage",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "cr\u00e9ation d'une page du menu (page du mod)",
+   "header": "menu",
+   "modules": [
+    "menu"
+   ]
+  },
+  {
+   "name": "Menu_pageCreated",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "page du menu cr\u00e9\u00e9e (choix du mode, listes...)",
+   "header": "menu",
+   "modules": [
+    "menu"
+   ]
+  },
+  {
+   "name": "Menu_minigameList",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liste des mini-jeux du jeu libre (ordre, filtre)",
+   "header": "menu",
+   "modules": [
+    "menu"
+   ]
+  },
+  {
+   "name": "Menu_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "une partie va commencer depuis le menu (sc\u00e8ne modifiable)",
+   "header": "menu",
+   "modules": [
+    "menu"
+   ]
+  },
+  {
+   "name": "Camera_pose",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pose de la cam\u00e9ra du plateau pour cette image, avant son emploi",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_start",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but d'une partie (nouvelle ou reprise)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_store",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "sauvegarde du plateau",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_roundEnd",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "fin de manche",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin du plateau (lib\u00e9rer ce que le mod a cr\u00e9\u00e9)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_setupBoard",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "plateau mis en place",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_intro",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pr\u00e9sentation de d\u00e9but de partie, avant le message de bienvenue",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_introStart",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but de la pr\u00e9sentation de d\u00e9but de partie, avant le survol de l'\u00eele",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_introWelcome",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "apr\u00e8s le survol de l'\u00eele, juste avant l'accueil du pr\u00e9sentateur",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_setEruptionVisuals",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "aspect de l'\u00e9ruption du volcan (ciel, fum\u00e9e, cases)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_eruptionEnded",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "fin d'une \u00e9ruption (le ciel d'\u00e9ruption dispara\u00eet)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_setCaveView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "passage \u00e0 la vue de la grotte (mode 1) ou du plateau (0)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_eruptionLook",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "effets de fum\u00e9e et de cendres de l'\u00e9ruption",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Volcano_exitSpace",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "case de sortie du volcan",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_roundResults",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "ordre de jeu lu des r\u00e9sultats du mini-jeu de fin de manche",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_playersPlaced",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueurs replac\u00e9s sur leurs cases, tour en cours choisi",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_turnPrepared",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but d'un tour pr\u00e9par\u00e9 (joueurs remis en place)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_rulesPages",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pages des r\u00e8gles de d\u00e9but de partie",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_targetAllowed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "un joueur peut-il \u00eatre vis\u00e9 (duel, tornade, OVNI)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_noTarget",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "tornade ou OVNI sans personne \u00e0 viser",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpaceUfo_target",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur \u00e9chang\u00e9 par l'OVNI, choisi par le mod",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_spaceMinigame",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mode du mini-jeu de la case d'un joueur",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Minigame_select",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mode et \u00e9quipes d'un mini-jeu",
+   "header": "mr001",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr721",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "Board_isWinner",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "un joueur a-t-il gagn\u00e9 la partie",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Board_finalRanks",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "classement final",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_mapCreated",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "\u00e9v\u00e9nements des cases cr\u00e9\u00e9s",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpaceManager_built",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cases du plateau cr\u00e9\u00e9es",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpaceManager_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin des cases du plateau",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "MapView_spaceGuide",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "guide d'une case dans la vue de la carte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_color",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleur d'un joueur (maillot, panneaux, mini-carte)",
+   "header": "mr001",
+   "modules": [
+    "inst",
+    "menu",
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507",
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603",
+    "openmess",
+    "ranking"
+   ]
+  },
+  {
+   "name": "Island_panelValue",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rang et nombre (cases restantes) du panneau d'un joueur",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "ScorePanel_digits",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chiffres du panneau \u00ab Reste : \u00bb et valeur maximale",
+   "header": "mr001",
+   "modules": [
+    "inst",
+    "menu",
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507",
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603",
+    "openmess",
+    "ranking"
+   ]
+  },
+  {
+   "name": "ScorePanel_colored",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "couleurs du panneau \u00ab Reste : \u00bb d'un joueur",
+   "header": "mr001",
+   "modules": [
+    "inst",
+    "menu",
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507",
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603",
+    "openmess",
+    "ranking"
+   ]
+  },
+  {
+   "name": "PlayerName_slot",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "place d'un joueur dans l'\u00e9cran des noms",
+   "header": "mr001",
+   "modules": [
+    "inst",
+    "menu",
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg203",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg410",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg419",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg423",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507",
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603",
+    "openmess",
+    "ranking"
+   ]
+  },
+  {
+   "name": "Island_createMap",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cr\u00e9ation de la carte du plateau (avant / apr\u00e8s)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_calc",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image du plateau",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_finalRanking",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fond du classement final cr\u00e9\u00e9",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_turnTelop",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "chaque image du bandeau \u00ab tour \u00bb",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_turnStart",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9but du tour d'un joueur (apr\u00e8s le bandeau \u00ab tour \u00bb)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_turnEnd",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "fin du tour d'un joueur (d\u00e9placement et \u00e9v\u00e9nements finis)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_cameraPitch",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "inclinaison de la cam\u00e9ra du plateau",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_steppingStone",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "le d\u00e9fi des caisses / tonneaux (SteppingStone)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Island_challengeActions",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "actions des d\u00e9fis cr\u00e9\u00e9es",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_caveJoint",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "points d'accroche du mod\u00e8le de la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "carte du plateau cr\u00e9\u00e9e",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_caveViewSet",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "vue de la grotte / du plateau mise en place (fin)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "IslandMap_areaVisible",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "zones du plateau montr\u00e9es / cach\u00e9es",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpacePlusMinus_goal",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "saut d'une case plus jusqu'\u00e0 la sortie de la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpacePlusMinus_landed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "saut d'une case plus termin\u00e9 (pas au recul)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "DragonWall_need",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "r\u00e9sultat qu'il faut au mur du dragon",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "DragonWall_failed",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "lancer rat\u00e9 au mur du dragon",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "DragonWall_burned",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueur repouss\u00e9 par le souffle du dragon",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "DragonWall_broken",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mur du dragon bris\u00e9",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "SpikeBall_swept",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueurs emport\u00e9s par la boule \u00e0 pics",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "CaveGoal_enter",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "arriv\u00e9e \u00e0 la sortie de la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "CaveGoal_exit",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "sortie de la grotte, sur la case de retour",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "CaveGoal_walkOn",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "reprise de la marche apr\u00e8s la sortie de la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tornado_shown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "colonne de la tornade apparue / disparue",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_noVine",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "pas de liane ni de son arbre",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane cr\u00e9\u00e9e",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_destroy",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane d\u00e9truite",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_init",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane remise en place",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_action",
+   "kind": "bool",
+   "exclusive": true,
+   "doc": "le passage de la liane",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_caveView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane : vue de la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Tarzan_mapView",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "liane : vue de la carte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "CliffEdge_failed",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "chute rat\u00e9e au bord de la falaise",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "LavaRock_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rochers flottants de la grotte cr\u00e9\u00e9s",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "LavaRock_landed",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur pos\u00e9 sur un rocher flottant",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "LavaRock_partShown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "rocher flottant montr\u00e9 dans la grotte",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "LavaRock_bob",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "flottement des rochers",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Dice_doublesKind",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9 du lancer suppl\u00e9mentaire des doubles",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Dice_create",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "cr\u00e9ation d'un d\u00e9",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Dice_rollWait",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s en attente du lancer d'un joueur humain",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Dice_rollThrown",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s lanc\u00e9s par un joueur humain",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Dice_face",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "face sur laquelle un d\u00e9 tombe",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_freeWalk",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "marche libre du drapeau de d\u00e9veloppement",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_created",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "joueur cr\u00e9\u00e9 (ses mouvements charg\u00e9s)",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_moveDice",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "d\u00e9s du lancer de d\u00e9placement",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_moveThirdDie",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "troisi\u00e8me d\u00e9 du lancer de d\u00e9placement",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_moveRolled",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "lancer de d\u00e9placement termin\u00e9",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_stopped",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "joueur arr\u00eat\u00e9 sur une case",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_fork",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "embranchement : chemin choisi par le mod",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Player_step",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "pas vers la case suivante",
+   "header": "mr001",
+   "modules": [
+    "mr001"
+   ]
+  },
+  {
+   "name": "Minigame_pool",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mini-jeux du tirage",
+   "header": "mr001",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr721",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "Minigame_pick",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "tirage d'un mini-jeu",
+   "header": "mr001",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr721",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "Minigame_skip",
+   "kind": "bool",
+   "exclusive": false,
+   "doc": "mini-jeu saut\u00e9",
+   "header": "mr001",
+   "modules": [
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr721",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  },
+  {
+   "name": "MiiCharacter_body",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "mod\u00e8le du corps d'un personnage",
+   "header": "mr001",
+   "modules": [
+    "inst",
+    "menu",
+    "mg100",
+    "mg101",
+    "mg102",
+    "mg103",
+    "mg104",
+    "mg106",
+    "mg107",
+    "mg108",
+    "mg109",
+    "mg110",
+    "mg111",
+    "mg112",
+    "mg200",
+    "mg201",
+    "mg202",
+    "mg204",
+    "mg205",
+    "mg206",
+    "mg208",
+    "mg209",
+    "mg210",
+    "mg211",
+    "mg212",
+    "mg213",
+    "mg214",
+    "mg215",
+    "mg216",
+    "mg218",
+    "mg219",
+    "mg221",
+    "mg222",
+    "mg223",
+    "mg224",
+    "mg300",
+    "mg301",
+    "mg302",
+    "mg303",
+    "mg304",
+    "mg400",
+    "mg401",
+    "mg402",
+    "mg403",
+    "mg404",
+    "mg405",
+    "mg406",
+    "mg407",
+    "mg412",
+    "mg413",
+    "mg414",
+    "mg415",
+    "mg416",
+    "mg420",
+    "mg421",
+    "mg422",
+    "mg424",
+    "mg426",
+    "mg427",
+    "mg428",
+    "mg430",
+    "mg431",
+    "mg432",
+    "mg433",
+    "mg434",
+    "mg436",
+    "mg437",
+    "mg438",
+    "mg439",
+    "mg440",
+    "mg441",
+    "mg442",
+    "mg443",
+    "mg445",
+    "mg446",
+    "mg501",
+    "mg502",
+    "mg503",
+    "mg505",
+    "mg507",
+    "mr001",
+    "mr011",
+    "mr031",
+    "mr041",
+    "mr051",
+    "mr052",
+    "mr062",
+    "mr083",
+    "mr701",
+    "mr711",
+    "mr713",
+    "mr721",
+    "mr722",
+    "mr731",
+    "mr741",
+    "mr751",
+    "ms601",
+    "ms603"
+   ]
+  }
+ ]
+}
