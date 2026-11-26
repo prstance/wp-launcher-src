@@ -1,0 +1,576 @@
+{
+ "format": 2,
+ "modules": [
+  "mr001",
+  "inst",
+  "menu"
+ ],
+ "deltas": [
+  {
+   "disc": "main.dol",
+   "delta": "main.dol.wpd",
+   "lz": false
+  },
+  {
+   "disc": "/rel/boot.rel.lz",
+   "delta": "boot.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/loading.rel.lz",
+   "delta": "loading.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg100.rel.lz",
+   "delta": "mg100.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg101.rel.lz",
+   "delta": "mg101.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg102.rel.lz",
+   "delta": "mg102.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg103.rel.lz",
+   "delta": "mg103.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg418.rel.lz",
+   "delta": "mg418.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg104.rel.lz",
+   "delta": "mg104.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg106.rel.lz",
+   "delta": "mg106.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg107.rel.lz",
+   "delta": "mg107.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg108.rel.lz",
+   "delta": "mg108.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg109.rel.lz",
+   "delta": "mg109.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg110.rel.lz",
+   "delta": "mg110.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg411.rel.lz",
+   "delta": "mg411.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg111.rel.lz",
+   "delta": "mg111.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg417.rel.lz",
+   "delta": "mg417.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg112.rel.lz",
+   "delta": "mg112.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg200.rel.lz",
+   "delta": "mg200.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg201.rel.lz",
+   "delta": "mg201.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg202.rel.lz",
+   "delta": "mg202.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg203.rel.lz",
+   "delta": "mg203.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg204.rel.lz",
+   "delta": "mg204.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg205.rel.lz",
+   "delta": "mg205.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg206.rel.lz",
+   "delta": "mg206.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg208.rel.lz",
+   "delta": "mg208.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg209.rel.lz",
+   "delta": "mg209.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg210.rel.lz",
+   "delta": "mg210.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg504.rel.lz",
+   "delta": "mg504.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg211.rel.lz",
+   "delta": "mg211.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg212.rel.lz",
+   "delta": "mg212.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg213.rel.lz",
+   "delta": "mg213.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg214.rel.lz",
+   "delta": "mg214.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg215.rel.lz",
+   "delta": "mg215.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg408.rel.lz",
+   "delta": "mg408.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg216.rel.lz",
+   "delta": "mg216.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg506.rel.lz",
+   "delta": "mg506.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg218.rel.lz",
+   "delta": "mg218.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg219.rel.lz",
+   "delta": "mg219.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg221.rel.lz",
+   "delta": "mg221.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg222.rel.lz",
+   "delta": "mg222.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg223.rel.lz",
+   "delta": "mg223.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg224.rel.lz",
+   "delta": "mg224.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg300.rel.lz",
+   "delta": "mg300.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg301.rel.lz",
+   "delta": "mg301.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg302.rel.lz",
+   "delta": "mg302.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg303.rel.lz",
+   "delta": "mg303.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg304.rel.lz",
+   "delta": "mg304.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg400.rel.lz",
+   "delta": "mg400.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg401.rel.lz",
+   "delta": "mg401.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg402.rel.lz",
+   "delta": "mg402.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg403.rel.lz",
+   "delta": "mg403.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg404.rel.lz",
+   "delta": "mg404.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg405.rel.lz",
+   "delta": "mg405.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg406.rel.lz",
+   "delta": "mg406.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg407.rel.lz",
+   "delta": "mg407.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg410.rel.lz",
+   "delta": "mg410.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg412.rel.lz",
+   "delta": "mg412.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg413.rel.lz",
+   "delta": "mg413.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg414.rel.lz",
+   "delta": "mg414.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg415.rel.lz",
+   "delta": "mg415.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg416.rel.lz",
+   "delta": "mg416.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg419.rel.lz",
+   "delta": "mg419.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg420.rel.lz",
+   "delta": "mg420.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg421.rel.lz",
+   "delta": "mg421.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg422.rel.lz",
+   "delta": "mg422.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg423.rel.lz",
+   "delta": "mg423.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg424.rel.lz",
+   "delta": "mg424.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg426.rel.lz",
+   "delta": "mg426.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg427.rel.lz",
+   "delta": "mg427.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg428.rel.lz",
+   "delta": "mg428.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg430.rel.lz",
+   "delta": "mg430.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg431.rel.lz",
+   "delta": "mg431.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg432.rel.lz",
+   "delta": "mg432.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg433.rel.lz",
+   "delta": "mg433.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg434.rel.lz",
+   "delta": "mg434.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg436.rel.lz",
+   "delta": "mg436.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg437.rel.lz",
+   "delta": "mg437.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg438.rel.lz",
+   "delta": "mg438.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg439.rel.lz",
+   "delta": "mg439.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg440.rel.lz",
+   "delta": "mg440.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg441.rel.lz",
+   "delta": "mg441.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg442.rel.lz",
+   "delta": "mg442.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg443.rel.lz",
+   "delta": "mg443.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg445.rel.lz",
+   "delta": "mg445.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg446.rel.lz",
+   "delta": "mg446.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg501.rel.lz",
+   "delta": "mg501.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg502.rel.lz",
+   "delta": "mg502.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg503.rel.lz",
+   "delta": "mg503.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg505.rel.lz",
+   "delta": "mg505.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg507.rel.lz",
+   "delta": "mg507.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg508.rel.lz",
+   "delta": "mg508.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mg509.rel.lz",
+   "delta": "mg509.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr011.rel.lz",
+   "delta": "mr011.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr031.rel.lz",
+   "delta": "mr031.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr041.rel.lz",
+   "delta": "mr041.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr051.rel.lz",
+   "delta": "mr051.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr052.rel.lz",
+   "delta": "mr052.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr062.rel.lz",
+   "delta": "mr062.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr083.rel.lz",
+   "delta": "mr083.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr701.rel.lz",
+   "delta": "mr701.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr711.rel.lz",
+   "delta": "mr711.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr713.rel.lz",
+   "delta": "mr713.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr721.rel.lz",
+   "delta": "mr721.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr722.rel.lz",
+   "delta": "mr722.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr731.rel.lz",
+   "delta": "mr731.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr741.rel.lz",
+   "delta": "mr741.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/mr751.rel.lz",
+   "delta": "mr751.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/ms601.rel.lz",
+   "delta": "ms601.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/ms602.rel.lz",
+   "delta": "ms602.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/ms603.rel.lz",
+   "delta": "ms603.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/openmess.rel.lz",
+   "delta": "openmess.rel.wpd",
+   "lz": true
+  },
+  {
+   "disc": "/rel/ranking.rel.lz",
+   "delta": "ranking.rel.wpd",
+   "lz": true
+  }
+ ],
+ "twins": {}
+}

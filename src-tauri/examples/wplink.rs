@@ -2,12 +2,18 @@
 //!
 //!   cargo run --release --example wplink -- <core dir> <out dir> <unpacked mod dir>[,setting=value…] …
 //!
-//! The texts are applied to the disc's message files, and the "sound" patches to the disc's sound
-//! archives, read from $WP_DISC/files (an extracted disc).
+//! $WP_DISC is an extracted disc (sys/main.dol, files/…): the core's files are made from it (its deltas,
+//! once, into <out dir>-core beside the out dir, made again for another core or disc), the texts are
+//! applied to its message files, and the "sound" patches to its sound archives.
 //!
 //! Writes <out dir>/linked.xml (Riivolution: section "PartyLauncher", option "Code") and its files
-//! (rel/<module>.rel.lz, locale/<language>/mess.bin, sound/wp_sound.brsar…); prints the sound warnings.
+//! (main.dol and rel/<name>.rel.lz of the core, rel/<module>.rel.lz linked, wp/minigames.bin,
+//! locale/<language>/mess.bin, sound/wp_sound.brsar…); prints the sound warnings. A core file that a mod
+//! replaces whole (its "files" patches, the <file disc=…> of its Riivolution XMLs) is left to it, as the
+//! launcher does.
 
+#[path = "../src/delta.rs"]
+mod delta;
 #[path = "../src/link/mod.rs"]
 mod link;
 #[path = "../src/lz.rs"]
@@ -17,6 +23,34 @@ mod sound;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+fn fail(message: &str) -> ! {
+    eprintln!("erreur : {message}");
+    std::process::exit(1)
+}
+
+/// The disc files a package replaces whole: its "files" patches and the <file disc=…/> of its Riivolution
+/// XMLs (all their options: the launcher reads the chosen ones only).
+fn replaced(dir: &std::path::Path, m: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in m["patches"].as_array().unwrap() {
+        if p["type"] == "files" {
+            out.extend(p["files"].as_array().unwrap().iter().filter_map(|f| f["disc"].as_str().map(String::from)));
+        }
+        if p["type"] == "riivolution" {
+            let text = std::fs::read_to_string(dir.join(p["xml"].as_str().unwrap())).unwrap_or_default();
+            for tag in text.split("<file").skip(1) {
+                let Some(at) = tag.find("disc=\"") else { continue };
+                let rest = &tag[at + 6..];
+                let disc = &rest[..rest.find('"').unwrap_or(rest.len())];
+                if !tag[..at].contains('>') && !tag.contains("offset=") {
+                    out.push(disc.to_string());
+                }
+            }
+        }
+    }
+    out.iter().map(|d| format!("/{}", d.trim_start_matches('/').to_lowercase())).collect()
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -55,11 +89,25 @@ fn main() {
         let sounds = m["patches"].as_array().unwrap().iter().filter(|p| p["type"] == "sound").map(|p| serde_json::from_value(p.clone()).unwrap()).collect();
         mods.push(link::CodeMod { id: m["id"].as_str().unwrap(), dir, modules, writes, messages, messages_with, minigames, sounds });
     }
+    let root = PathBuf::from(std::env::var("WP_DISC").unwrap_or_else(|_| {
+        eprintln!("WP_DISC : le disque extrait");
+        std::process::exit(1)
+    }));
     let disc = |path: &str| {
-        let root = std::env::var("WP_DISC").map_err(|_| "WP_DISC : le disque extrait".to_string())?;
-        std::fs::read(PathBuf::from(root).join("files").join(path.trim_start_matches('/'))).map_err(|e| format!("{path} : {e}"))
+        let file = if path.eq_ignore_ascii_case("main.dol") { root.join("sys/main.dol") } else { root.join("files").join(path.trim_start_matches('/')) };
+        std::fs::read(&file).map_err(|e| format!("{} : {e}", file.display()))
     };
-    match link::link_game(&core, &disc, &mods, &out) {
+    let base = if link::links(&mods) {
+        let package = link::corepkg::read(&core).unwrap_or_else(|e| fail(&e));
+        let cache = PathBuf::from(format!("{}-core", out.display().to_string().trim_end_matches('/')));
+        let id = root.canonicalize().unwrap_or(root.clone()).display().to_string();
+        package.make(&core, &cache, &id, &disc).unwrap_or_else(|e| fail(&format!("cœur des mods : {e}")));
+        package.files(&cache)
+    } else {
+        Vec::new()
+    };
+    let replaced: Vec<String> = dirs.iter().zip(&manifests).flat_map(|((dir, _), m)| replaced(dir, m)).collect();
+    match link::link_game(&core, &disc, &base, &replaced, &mods, &out) {
         Ok(Some(l)) => {
             for w in &l.warnings {
                 eprintln!("son : {w}");

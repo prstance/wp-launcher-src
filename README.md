@@ -306,9 +306,32 @@ Un `.wpmod` est un zip avec un `mod.json` à la racine :
 
 Le launcher est aussi un éditeur de liens (`src-tauri/src/link/`, conception dans wp-core `docs/modding.md`) : un patch
 `code` livre des objets compilés que le launcher relie au cœur, au lancement, dans `<données>/mods/.linked/`. Plusieurs
-mods peuvent ainsi changer le même module. Le cœur (`src-tauri/core/`) est l'export de wp-core,
-`build/SUPP01/wpcore/` après `configure.py --core` et `ninja`, sans `disc_mr001.rel` ; il est dans le dépôt, car la CI de
-release l'embarque. Un paquet ne se lie qu'à un cœur qui a ses hooks : le changer demande de refaire les paquets.
+mods peuvent ainsi changer le même module.
+
+Le cœur des mods (« core v2 », wp-srccore `docs/core.md`) est le jeu entier recompilé depuis sa décompilation.
+`src-tauri/core/` est l'export de wp-srccore (`tools/core/export.py`, `build/SUPP01/corepkg/`, dans un arbre
+`configure.py --core` construit) ; il est dans le dépôt, car la CI de release l'embarque :
+
+- `core.json` (`"format": 2`) : les modules où se relient les mods (`mr001`, `inst`, `menu`, livrés en `.plf` avec
+  leur `.json` : en-tête REL, hooks) et les deltas ;
+- `main.sym` : les symboles du main.dol du cœur ;
+- `main.dol.wpd` et un `<nom>.rel.wpd` par REL que le cœur change : des deltas (`delta.rs`) contre le `sys/main.dol`
+  et les `/rel/*.rel.lz` du disque du joueur. Le paquet n'a aucun fichier du jeu.
+
+Dès qu'un mod a du code, des mini-jeux, des textes ou des sons (`link_game`), le launcher fait les fichiers du cœur
+depuis l'ISO (`rebuild.rs` `core_files`, phase « preparing ») une fois pour un cœur et un disque, dans
+`<données>/mods/.core/` (`link/corepkg.rs` ; `core.txt` dit de quoi ils sont faits), puis `linked.xml` les met à la
+place de ceux du disque (`<file disc="main.dol">`, `/rel/<nom>.rel.lz`, liés en dur depuis `.core/`) et y ajoute
+toujours mr001, inst et menu reliés depuis leur `.plf` (ceux du disque sauteraient à de mauvaises adresses dans le
+main.dol du cœur ; sans mod, chacun est le REL du build du cœur à l'octet près). Un fichier du cœur qu'un mod remplace
+en entier (patch `files`, `<file>` de son XML) reste celui du mod, comme celui du disque ; s'il est relié avec le code
+d'un autre mod, c'est l'incompatibilité habituelle. Les injections et objets `main` des mods restent des patchs mémoire,
+appliqués sur le main.dol du cœur.
+
+Les mini-jeux des mods (`minigames`) vont dans `/wp/minigames.bin` (`link/minigames.rs`, créé par `linked.xml`), que
+`GameData` du cœur lit au démarrage : plus de table de main.dol à déplacer, plus de limite. Un mod fait pour l'ancien
+cœur (patch `code` et `"launcher"` en dessous de `>=0.5`) est refusé : il faut sa nouvelle version. Un paquet ne se lie
+qu'à un cœur qui a ses hooks et ses symboles : changer de cœur demande de refaire les paquets.
 
 ### Deltas : pas de fichier du jeu dans le paquet
 

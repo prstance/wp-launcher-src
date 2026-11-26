@@ -75,6 +75,12 @@
    "doc": "d\u00e9but de la pr\u00e9sentation de d\u00e9but de partie, avant le survol de l'\u00eele"
   },
   {
+   "name": "Island_introWelcome",
+   "kind": "void",
+   "exclusive": false,
+   "doc": "apr\u00e8s le survol de l'\u00eele, juste avant l'accueil du pr\u00e9sentateur"
+  },
+  {
    "name": "IslandMap_setEruptionVisuals",
    "kind": "bool",
    "exclusive": true,
@@ -542,6 +548,5 @@
    "exclusive": false,
    "doc": "mod\u00e8le du corps d'un personnage"
   }
- ],
- "save_bytes": 17
+ ]
 }

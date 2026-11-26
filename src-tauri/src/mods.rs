@@ -29,9 +29,12 @@ const FILES_OPTION: &str = "Files";
 /// link/mod.rs link_game's XML.
 const CODE_OPTION: &str = "Code";
 /// The launcher version the packages' "launcher" ranges are checked against, when Cargo.toml's is
-/// older: the first release that reads everything this build reads ("sound" patches: 0.4). Without
+/// older: the first release that reads everything this build reads (the code of core v2: 0.5). Without
 /// use once Cargo.toml's version reaches it (then remove it).
-const READS_PACKAGES_OF: &str = "0.4.0";
+const READS_PACKAGES_OF: &str = "0.5.0";
+/// The first launcher with core v2 (wp-srccore docs/core.md): a package with code that asks for less
+/// was built against the old core's symbols.
+const CORE_V2: &str = ">=0.5";
 
 /// Saved values of the packages' settings: package id -> setting id -> value.
 pub type Values = BTreeMap<String, BTreeMap<String, i64>>;
@@ -130,6 +133,12 @@ pub struct DeltaFile {
 }
 
 impl Manifest {
+    /// Its code was built for the old core (wp-core's binary patches of main.dol), which core v2 replaced.
+    fn for_old_core(&self) -> bool {
+        let least = self.launcher.as_deref().and_then(|r| r.strip_prefix(">="));
+        self.patches.iter().any(|p| p.kind == "code") && !least.is_some_and(|v| satisfies(v, CORE_V2))
+    }
+
     /// The files the package makes from the disc.
     pub fn deltas(&self) -> impl Iterator<Item = &DeltaFile> {
         self.patches.iter().filter(|p| p.kind == "delta").flat_map(|p| &p.files)
@@ -767,8 +776,8 @@ fn read_footprint(package: &Path, manifest: &Manifest, values: &BTreeMap<String,
     footprint.linked.extend(manifest.messages.keys().map(|l| disc_path(&link::messages_file(l))));
     footprint.linked.extend(manifest.messages_with.values().flat_map(|l| l.keys()).map(|l| disc_path(&link::messages_file(l))));
     if !manifest.minigames.is_empty() {
-        // the core's modules that list the minigames (wp-core wp/mod/minigames.h)
-        footprint.linked.extend(["/rel/inst.rel.lz", "/rel/menu.rel.lz"].map(disc_path));
+        // the core's registry of the minigames (link/minigames.rs)
+        footprint.linked.push(disc_path(link::minigames::FILE));
     }
     footprint.linked.sort();
     footprint.linked.dedup();
@@ -973,6 +982,9 @@ fn check(mods: &[&Installed], game: Option<&str>) -> Vec<Problem> {
         if let Some(game) = game.filter(|g| !m.games.iter().any(|ok| ok == g)) {
             error(tr!("« {name} » ne fonctionne pas sur ton ISO ({game}). Il demande : {games}.", name = name, game = game, games = m.games.join(", ")), &[&m.id]);
         }
+        if m.for_old_core() {
+            error(tr!("« {name} » a été fait pour l’ancien cœur des mods : il faut sa nouvelle version.", name = name), &[&m.id]);
+        }
         for (id, range) in &m.requires {
             match mods.iter().find(|o| &o.manifest.id == id) {
                 None => error(tr!("« {name} » a besoin du mod « {id} », qui n’est pas activé.", name = name, id = id), &[&m.id]),
@@ -1116,7 +1128,8 @@ mod core_files {
     include!(concat!(env!("OUT_DIR"), "/core_files.rs"));
 }
 
-/// The mods' core (wp-core tools/wpcore_pack.py: the game's code the mods link with), shipped with the launcher.
+/// The mods' core (wp-srccore tools/core/export.py: the game rebuilt from its decompilation, as deltas
+/// against the disc, and the modules the mods link into), shipped with the launcher.
 pub fn core_dir(app: &AppHandle) -> Option<PathBuf> {
     // During development it is used straight from src-tauri/core.
     if cfg!(debug_assertions) {
@@ -1285,15 +1298,24 @@ fn linked_dir(dir: &Path) -> PathBuf {
     dir.join(".linked")
 }
 
-/// Before a launch (after boot_file): the mods' code linked with the core, their texts applied to the
-/// disc's message files and their sound patches to the disc's sound archives (taken from the player's
-/// disc the first time).
+/// Whether link_code still has the core's files to make from the disc (a while, the first time).
+pub fn core_to_make(app: &AppHandle, disc: &Disc, packages: &[&Installed]) -> bool {
+    let code: Vec<link::CodeMod> = packages.iter().map(|m| code_mod(m)).collect();
+    link::links(&code) && core_dir(app).is_some_and(|core| crate::rebuild::core_needed(app, disc, &core))
+}
+
+/// Before a launch (after boot_file): the core's files made from the disc (the first time), the mods'
+/// code linked with the core, their minigames, their texts applied to the disc's message files and their
+/// sound patches to the disc's sound archives (taken from the player's disc the first time).
 pub async fn link_code(app: &AppHandle, disc: &Disc, packages: &[&Installed]) -> Result<(), String> {
     let code: Vec<link::CodeMod> = packages.iter().map(|m| code_mod(m)).collect();
-    if code.iter().all(|c| c.modules.is_empty() && c.messages.is_empty() && c.sounds.is_empty()) {
+    if !link::links(&code) {
         return Ok(());
     }
     let core = core_dir(app).ok_or_else(|| tr!("Ce build du launcher n’a pas le cœur des mods : mets-le à jour."))?;
+    let base = crate::rebuild::core_files(app, disc, &core).await?;
+    // (a disc file a package replaces whole: the core's gives way, as the disc's)
+    let replaced: Vec<String> = packages.iter().flat_map(|m| m.footprint.files.iter().cloned()).collect();
     let wanted: Vec<String> = code
         .iter()
         .flat_map(|c| c.messages.keys().chain(c.messages_with.values().flat_map(|l| l.keys())).map(|l| link::messages_file(l)))
@@ -1308,7 +1330,7 @@ pub async fn link_code(app: &AppHandle, disc: &Disc, packages: &[&Installed]) ->
     };
     let out = linked_dir(&data_dir(app, "mods")?);
     let names: BTreeMap<&str, String> = packages.iter().map(|m| (m.manifest.id.as_str(), m.manifest.name.to_string())).collect();
-    let linked = link::link_game(&core, &read, &code, &out).map_err(|e| {
+    let linked = link::link_game(&core, &read, &base, &replaced, &code, &out).map_err(|e| {
         let who: Vec<String> = e.mods.iter().filter_map(|id| names.get(id.as_str())).map(|n| format!("« {n} »")).collect();
         let who = if who.is_empty() { String::new() } else { format!(" ({})", who.join(", ")) };
         tr!("Le code des mods ne s’assemble pas{who} : {why}", who = who, why = e.message)
@@ -1822,7 +1844,7 @@ mod tests {
     /// A mod of the compatible system: code, files and texts, no Riivolution XML.
     fn code_mod_with(dir: &Path, id: &str, text: &str, setting_module: &str) -> Result<Installed, String> {
         let json = format!(
-            r#"{{"format":1,"id":"{id}","name":"{id}","version":"2.0.0","games":["SUPP01"],
+            r#"{{"format":1,"id":"{id}","name":"{id}","version":"2.0.0","games":["SUPP01"],"launcher":">=0.5",
             "settings":[{{"id":"r","type":"number","label":"R","default":14,"min":8,"max":25,"symbol":{{"module":"{setting_module}","name":"gR"}}}}],
             "messages":{{"fr_EU":{{"m031_2700":"{text}"}}}},
             "patches":[{{"type":"code","modules":{{"mr001":{{"objects":["code/x.o"],"hooks":{{"Board_start":"F"}},"save":{{"symbol":"gAt","size":2}}}}}}}},
@@ -1857,7 +1879,7 @@ mod tests {
         let a = sound_mod_with(&dir, "a", "GROUP_MOD_A", ">=0.4", "g.rwsd").unwrap();
         assert_eq!(a.footprint.linked, ["/sound/wp_sound.brsar"]);
         assert_eq!(code_mod(&a).sounds, [link::SoundSpec { archive: "/sound/wp_sound.brsar".into(), patch: "sound/wp_sound/patch.json".into() }]);
-        assert!(sound_mod_with(&dir, "later", "GROUP_MOD_L", ">=0.5", "g.rwsd").err().unwrap().contains("0.5"));
+        assert!(sound_mod_with(&dir, "later", "GROUP_MOD_L", ">=0.6", "g.rwsd").err().unwrap().contains("0.6"));
         assert!(sound_mod_with(&dir, "missing", "GROUP_MOD_M", ">=0.4", "nope.rwsd").err().unwrap().contains("nope.rwsd"));
         assert!(sound_mod_with(&dir, "escape", "GROUP_MOD_E", ">=0.4", "../../mod.json").err().unwrap().contains("hors du paquet"));
         // the same game sound edited: a warning; the same group added: they can't run together
@@ -1942,7 +1964,7 @@ mod tests {
         let on = debug_tools(&saved(r#"{"partylauncher.debug":{"des":1,"mini-jeux":2}}"#)).unwrap();
         assert!(on.debug_on());
         assert!(code_mod(&on).writes.contains(&("mr001".into(), "gDebugDice".into(), 0, vec![0, 0, 0, 1])));
-        // before Winter Mode, linked with the launcher's core
+        // before Winter Mode; linked with the launcher's core
         let dir = scratch("tools");
         let wpver = std::fs::read_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("versions")).unwrap().flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "wpver")).unwrap();
         install(&versions::WPVER, &wpver, &dir.join("mods")).unwrap();
@@ -1950,10 +1972,40 @@ mod tests {
         assert_eq!(load_order(Some(&off), Some(&winter), &[], &[]).len(), 1);
         let order = load_order(Some(&on), Some(&winter), &[], &[]);
         assert_eq!(order[0].manifest.id, DEBUG_TOOLS);
-        let code: Vec<link::CodeMod> = order.iter().map(|m| code_mod(m)).collect();
-        if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &code) {
+        if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &[code_mod(&on)]) {
             panic!("{}", e.message);
         }
+        // (the shipped version too, once it is one for core v2)
+        let code: Vec<link::CodeMod> = order.iter().map(|m| code_mod(m)).collect();
+        if !winter.manifest.for_old_core() {
+            if let Err(e) = link::check_code(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core"), &code) {
+                panic!("{}", e.message);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn code_for_the_old_core_needs_its_new_version() {
+        let dir = scratch("old-core");
+        let new = code_mod_with(&dir, "new", "texte", "mr001").unwrap();
+        assert!(!new.manifest.for_old_core());
+        for (id, launcher) in [("old", r#""launcher":">=0.4","#), ("older", "")] {
+            let json = format!(
+                r#"{{"format":1,"id":"{id}","name":"{id}","version":"1.0.0","games":["SUPP01"],{launcher}
+                "patches":[{{"type":"code","modules":{{"main":{{"objects":["code/x.o"]}}}}}}]}}"#
+            );
+            let path = dir.join("in").join(format!("{id}.wpmod"));
+            package(&path, &[("mod.json", &json), ("code/x.o", "o")]);
+            install(&WPMOD, &path, &dir.join("mods")).unwrap();
+            let old = installed(&WPMOD, &dir.join("mods"), &Values::new()).into_iter().find(|m| m.manifest.id == id).unwrap();
+            let problems = check(&[&new, &old], None);
+            assert_eq!(levels(&problems), ["error"], "{problems:?}");
+            assert!(problems[0].message.contains("ancien cœur") && problems[0].packages == [id], "{problems:?}");
+        }
+        // a package without code needs nothing of the core
+        let sound = sound_mod_with(&dir, "s", "GROUP_A", ">=0.4", "g.rwsd").unwrap();
+        assert!(!sound.manifest.for_old_core());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

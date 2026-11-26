@@ -1,10 +1,9 @@
-//! The mods' code for main.dol, which never changes: it is linked at a fixed address of the free low memory
-//! and reached by injections. An injected instruction becomes a `b` to a trampoline that saves every register
-//! into a `WpContext` (wp/mod/context.h), calls the handlers with it (they may read and change the registers,
-//! or set `resume` to continue elsewhere), restores, runs the instruction and comes back. Several mods at the
-//! same place share the trampoline. A replaced function's first instruction becomes a `b` to its replacement.
-//! Once main.dol's minigame table is moved (minigames.rs), its original place takes what does not fit in the
-//! low memory. Everything becomes Riivolution memory patches.
+//! The mods' code for main.dol (the core's, corepkg.rs): it is linked at a fixed address of the free low
+//! memory and reached by injections. An injected instruction becomes a `b` to a trampoline that saves every
+//! register into a `WpContext` (wp/mod/context.h), calls the handlers with it (they may read and change the
+//! registers, or set `resume` to continue elsewhere), restores, runs the instruction and comes back. Several
+//! mods at the same place share the trampoline. Everything becomes Riivolution memory patches, applied on
+//! top of the core's main.dol.
 
 use super::elf::{self, Object, Symbol};
 use super::rel::MainSymbols;
@@ -26,32 +25,12 @@ pub struct Inject {
     pub after: bool,
 }
 
-/// One function replaced: its first instruction, which must be `expect`, becomes a `b` to `handler`.
-/// `original`, when set, is a function the launcher makes that runs the replaced one: `run` (its first
-/// instruction, `expect` or what another patch puts there), then the rest in place.
-#[derive(Clone)]
-pub struct Replace {
-    pub symbol: String,
-    pub expect: u32,
-    pub run: u32,
-    pub handler: String,
-    pub original: Option<String>,
-}
-
 #[derive(Clone, Default)]
 pub struct DolPart {
     pub id: String,
     pub objects: Vec<Object>,
     pub injects: Vec<Inject>,
-    pub replaces: Vec<Replace>,
     pub writes: Vec<(String, u32, Vec<u8>)>,
-}
-
-/// Memory of main.dol that the mods' code may take after the low memory: the original place of the
-/// minigame table once the launcher moved it, with its bytes (Riivolution's `original`).
-pub struct Spare {
-    pub address: u32,
-    pub original: Vec<u8>,
 }
 
 /// A memory patch: `original`, when set, must be there (else Riivolution leaves it).
@@ -136,7 +115,6 @@ struct Region {
     end: u32,
     next: u32,
     bytes: Vec<u8>,
-    original: Option<Vec<u8>>,
 }
 
 /// The free areas, in the order they are filled.
@@ -284,24 +262,14 @@ fn trampoline(start: u32, at: u32, original: u32, before: &[u32], after: &[u32])
 /// may use them (its main.dol part's variables and functions).
 pub type Linked = (Vec<Patch>, Vec<(String, u32)>);
 
-/// Links the mods' main.dol parts after `data` (at BASE: the minigame table, minigames.rs), then in `spare`
-/// what does not fit. An injected instruction and a replaced function's first one are given (`expect`,
-/// Riivolution checks them: `original`), so main.dol itself is not needed.
-pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&Spare>) -> Result<Linked, LinkError> {
-    if data.is_empty() && parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty() && p.replaces.is_empty()) {
+/// Links the mods' main.dol parts at BASE. An injected instruction is given (`expect`, Riivolution checks
+/// it: `original`), so main.dol itself is not needed.
+pub fn link(parts: &[DolPart], main: &MainSymbols) -> Result<Linked, LinkError> {
+    if parts.iter().all(|p| p.objects.is_empty() && p.injects.is_empty()) {
         return Ok((vec![], vec![]));
     }
     let all: Vec<&str> = parts.iter().map(|p| p.id.as_str()).collect();
-    if BASE + data.len() as u32 > END {
-        return Err(LinkError::new(format!("la table des mini-jeux dépasse la place libre ({} octets de trop)", BASE + data.len() as u32 - END), &[]));
-    }
-    let mut memory = Memory {
-        regions: vec![Region { start: BASE, end: END, next: (BASE + data.len() as u32 + 31) & !31, bytes: Vec::new(), original: None }],
-    };
-    if let Some(s) = spare {
-        let end = s.address + s.original.len() as u32;
-        memory.regions.push(Region { start: s.address, end, next: s.address, bytes: Vec::new(), original: Some(s.original.clone()) });
-    }
+    let mut memory = Memory { regions: vec![Region { start: BASE, end: END, next: BASE, bytes: Vec::new() }] };
     let full = |memory: &Memory, size: u32| {
         LinkError::new(format!("le code des mods pour main.dol dépasse la place libre ({size} octets à placer, {} libres)", memory.free()), &all)
     };
@@ -357,33 +325,7 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&S
         }
     }
 
-    // replaced functions: the jumps to the replacements, and the originals the parts call
-    let mut replaced: Vec<(u32, &Replace, &str)> = Vec::new();
     let mut code: Vec<(u32, Vec<u32>)> = Vec::new();
-    for part in parts {
-        for r in &part.replaces {
-            let fail = |m: String| LinkError::new(m, &[&part.id]);
-            let at = main.get(&r.symbol).ok_or_else(|| fail(format!("« {} » n'est pas dans main.dol", r.symbol)))?.0;
-            if let Some((_, _, other)) = replaced.iter().find(|x| x.0 == at) {
-                return Err(LinkError::new(format!("« {} » est remplacée deux fois", r.symbol), &[other, &part.id]));
-            }
-            if let Some(name) = &r.original {
-                let make = |pc: u32| -> Result<Vec<u32>, String> {
-                    let mut words = moved(r.run, at, pc)?;
-                    let back = pc + 4 * words.len() as u32;
-                    words.push(ppc::b(back, at + 4, false).ok_or("retour trop loin")?);
-                    Ok(words)
-                };
-                let (thunk, words) = memory.alloc_code(make).map_err(fail)?.ok_or_else(|| full(&memory, 8))?;
-                if let Some((_, other)) = globals.get(name) {
-                    return Err(LinkError::new(format!("« {name} » est défini deux fois"), &[other, &part.id]));
-                }
-                globals.insert(name.clone(), (thunk, part.id.clone()));
-                code.push((thunk, words));
-            }
-            replaced.push((at, r, &part.id));
-        }
-    }
     let resolve = |name: &str| globals.get(name).map(|g| g.0).or_else(|| main.get(name).map(|m| m.0));
 
     // trampolines, after the code
@@ -395,9 +337,6 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&S
             let found = inj.expect;
             if resolve(&inj.handler).is_none() {
                 return Err(fail(format!("« {} » est introuvable dans le code du mod", inj.handler)));
-            }
-            if let Some((_, r, other)) = replaced.iter().find(|x| x.1.symbol == inj.symbol) {
-                return Err(LinkError::new(format!("« {} » est remplacée : plus d'injection possible dedans", r.symbol), &[other, &part.id]));
             }
             match sites.iter_mut().find(|s| s.0 == at) {
                 Some(site) if site.1 != found => {
@@ -420,18 +359,9 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&S
         let jump = ppc::b(*at, start, false).ok_or_else(|| fail("tremplin trop loin".into()))?;
         site_patches.push(Patch { address: *at, value: jump.to_be_bytes().to_vec(), original: Some(original.to_be_bytes().to_vec()) });
     }
-    for (at, r, id) in &replaced {
-        let fail = |m: String| LinkError::new(m, &[id]);
-        let target = resolve(&r.handler).ok_or_else(|| fail(format!("« {} » est introuvable dans le code du mod", r.handler)))?;
-        let jump = ppc::b(*at, target, false).ok_or_else(|| fail("remplacement trop loin".into()))?;
-        site_patches.push(Patch { address: *at, value: jump.to_be_bytes().to_vec(), original: Some(r.expect.to_be_bytes().to_vec()) });
-    }
 
-    // the bytes: the data, the sections, relocations, then the trampolines
+    // the bytes: the sections, relocations, then the trampolines
     memory.close();
-    if !data.is_empty() {
-        memory.bytes(BASE, data.len()).copy_from_slice(data);
-    }
     for (p, part) in parts.iter().enumerate() {
         for (o, obj) in part.objects.iter().enumerate() {
             for (s, sec) in obj.sections.iter().enumerate() {
@@ -493,9 +423,8 @@ pub fn link(parts: &[DolPart], main: &MainSymbols, data: &[u8], spare: Option<&S
     }
     let mut patches = Vec::new();
     for r in memory.regions {
-        if r.next > r.start || r.start == BASE {
-            let original = r.original.map(|o| o[..r.bytes.len()].to_vec());
-            patches.push(Patch { address: r.start, value: r.bytes, original });
+        if r.next > r.start {
+            patches.push(Patch { address: r.start, value: r.bytes, original: None });
         }
     }
     patches.extend(site_patches);
@@ -523,50 +452,45 @@ mod tests {
     }
 
     #[test]
-    fn replaces_and_spills_into_the_spare_place() {
+    fn injects_and_writes() {
         let main = MainSymbols::parse("8000A3C0 1 f\n").unwrap();
-        // the low memory keeps 0x100 bytes: the handler takes them, the original's code goes to the spare place
-        let data = vec![0xAA; 0x1700];
-        let part = DolPart {
-            id: "cœur".into(),
-            objects: vec![super::super::module::data_object("handler", vec![0; 0x100])],
-            replaces: vec![Replace { symbol: "f".into(), expect: 0x3C80_801E, run: 0x3C80_8000, handler: "handler".into(), original: Some("f_orig".into()) }],
-            writes: vec![("handler".into(), 0, vec![1, 2, 3, 4])],
-            ..Default::default()
+        let inject = |id: &str| DolPart {
+            id: id.into(),
+            objects: vec![super::super::module::data_object(&format!("{id}_data"), vec![0; 0x10]), handler(&format!("{id}_h"))],
+            injects: vec![Inject { symbol: "f".into(), offset: 8, expect: 0x3C80_801E, handler: format!("{id}_h"), after: false }],
+            writes: vec![(format!("{id}_data"), 4, vec![1, 2, 3, 4])],
         };
-        let spare = Spare { address: 0x801D_D0E0, original: vec![0x55; 0x40] };
-        let (p, symbols) = link(&[part], &main, &data, Some(&spare)).unwrap();
-        assert_eq!(symbols, [("f_orig".to_string(), 0x801D_D0E0), ("handler".to_string(), BASE + 0x1700)]);
-        assert_eq!(p.len(), 3);
-        assert_eq!((p[0].address, p[0].value.len()), (BASE, 0x1800));
-        assert_eq!(&p[0].value[0x1700..0x1704], &[1, 2, 3, 4]);
-        let thunk: Vec<u32> = p[1].value.chunks(4).map(|w| u32::from_be_bytes(w.try_into().unwrap())).collect();
-        assert_eq!((p[1].address, thunk.len(), p[1].original.as_deref()), (0x801D_D0E0, 2, Some(&[0x55u8; 8][..])));
-        assert_eq!(thunk[0], 0x3C80_8000);
-        assert_eq!(b_at(0x801D_D0E4, thunk[1]), 0x8000_A3C4);
-        let jump = u32::from_be_bytes(p[2].value[..].try_into().unwrap());
-        assert_eq!((p[2].address, b_at(0x8000_A3C0, jump)), (0x8000_A3C0, BASE + 0x1700));
-        assert_eq!(p[2].original.as_deref(), Some(&[0x3C, 0x80, 0x80, 0x1E][..]));
-        // no room left anywhere
-        let small = Spare { address: 0x801D_D0E0, original: vec![0x55; 4] };
-        let part = DolPart { replaces: vec![Replace { original: Some("f_orig".into()), ..replace_f() }], ..core_part() };
-        assert!(link(&[part], &main, &data, Some(&small)).is_err());
+        let (p, symbols) = link(&[inject("a"), inject("b")], &main).unwrap();
+        // the low memory, then the site's jump (checked against the instruction expected there)
+        assert_eq!(p.len(), 2);
+        assert_eq!((p[0].address, p[0].original.as_ref()), (BASE, None));
+        let data = symbols.iter().find(|s| s.0 == "a_data").unwrap().1;
+        assert_eq!(&p[0].value[(data - BASE) as usize + 4..][..4], &[1, 2, 3, 4]);
+        let jump = u32::from_be_bytes(p[1].value[..].try_into().unwrap());
+        assert_eq!((p[1].address, p[1].original.as_deref()), (0x8000_A3C8, Some(&[0x3C, 0x80, 0x80, 0x1E][..])));
+        // one trampoline for both, in the low memory
+        assert!((BASE..END).contains(&b_at(0x8000_A3C8, jump)));
+        assert!(link(&[], &main).unwrap().0.is_empty());
     }
 
-    fn replace_f() -> Replace {
-        Replace { symbol: "f".into(), expect: 0x3C80_801E, run: 0x3C80_801E, handler: "handler".into(), original: None }
-    }
-
-    fn core_part() -> DolPart {
-        DolPart { id: "cœur".into(), objects: vec![super::super::module::data_object("handler", vec![0; 0x100])], ..Default::default() }
+    /// An object with a function `name` (blr).
+    fn handler(name: &str) -> Object {
+        let mut o = super::super::module::data_object(name, 0x4E80_0020u32.to_be_bytes().to_vec());
+        o.sections.iter_mut().filter(|s| s.is_alloc()).for_each(|s| s.flags |= elf::SHF_EXECINSTR);
+        o
     }
 
     #[test]
-    fn refuses_two_replacements_of_a_function() {
+    fn refuses_two_original_instructions_at_one_place() {
         let main = MainSymbols::parse("8000A3C0 1 f\n").unwrap();
-        let a = DolPart { replaces: vec![replace_f()], ..core_part() };
-        let b = DolPart { id: "autre".into(), objects: vec![], replaces: vec![replace_f()], ..Default::default() };
-        let e = link(&[a, b], &main, &[], None).err().unwrap();
-        assert_eq!(e.mods, ["cœur", "autre"]);
+        let part = |id: &str, expect: u32| DolPart {
+            id: id.into(),
+            objects: vec![handler(&format!("{id}_h"))],
+            injects: vec![Inject { symbol: "f".into(), offset: 0, expect, handler: format!("{id}_h"), after: false }],
+            ..Default::default()
+        };
+        assert!(link(&[part("a", 1), part("b", 2)], &main).is_err());
+        let e = link(&[DolPart { injects: vec![Inject { symbol: "g".into(), ..part("a", 1).injects[0].clone() }], ..part("a", 1) }], &main).err().unwrap();
+        assert!(e.message.contains("n'est pas dans main.dol"), "{}", e.message);
     }
 }

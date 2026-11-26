@@ -3,6 +3,7 @@
 //! the core's hooks get their lists of handlers, and the replaced functions jump to their replacement.
 
 use super::elf::{self, Object, Reloc, Section, Symbol};
+use super::rel::MainSymbols;
 use super::LinkError;
 use std::collections::HashMap;
 
@@ -192,7 +193,8 @@ pub fn empty_module() -> Object {
     obj
 }
 
-/// An object defining `symbol`: `bytes`, in .data.
+/// An object defining `symbol`: `bytes`, in .data (tests).
+#[cfg(test)]
 pub fn data_object(symbol: &str, bytes: Vec<u8>) -> Object {
     let mut obj = Object::default();
     obj.sections.push(Section { name: String::new(), kind: 0, flags: 0, align: 1, data: vec![], size: 0, relocs: vec![] });
@@ -223,8 +225,10 @@ fn hook_lists(lists: &[(String, Vec<String>)]) -> Object {
     obj
 }
 
-/// The core's module with the mods' parts linked in. The undefined symbols left are main.dol's.
-pub fn link(core: &Object, hooks: &[HookDef], mods: &[ModPart]) -> Result<Object, LinkError> {
+/// The core's module with the mods' parts linked in. The undefined symbols left are main.dol's: among
+/// them the lists of the hooks no mod uses here, when main.dol has them (`main`; wp-srccore
+/// src/wp/core/Hooks.cpp), so that with no mod the module is the core's own build.
+pub fn link(core: &Object, hooks: &[HookDef], mods: &[ModPart], main: &MainSymbols) -> Result<Object, LinkError> {
     let mut linker = Linker { out: core.clone(), owners: Owners::new() };
     for part in mods {
         for obj in &part.objects {
@@ -233,7 +237,7 @@ pub fn link(core: &Object, hooks: &[HookDef], mods: &[ModPart]) -> Result<Object
     }
 
     // each hook the core calls gets its list, empty if no mod uses it (and so does each hook of the core's
-    // shared code that a new module has: no mod hooks into those)
+    // shared code that a new module has: no mod hooks into those), unless main.dol has one
     let mut called: Vec<String> = linker
         .out
         .symbols
@@ -266,7 +270,10 @@ pub fn link(core: &Object, hooks: &[HookDef], mods: &[ModPart]) -> Result<Object
             list.1.push(handler.clone());
         }
     }
-    linker.merge(&hook_lists(&lists), "cœur")?;
+    lists.retain(|(hook, handlers)| !handlers.is_empty() || main.get(&hook_list_symbol(hook)).is_none());
+    if !lists.is_empty() {
+        linker.merge(&hook_lists(&lists), "cœur")?;
+    }
     linker.bind();
 
     // replaced functions: their first instruction jumps to the replacement

@@ -365,7 +365,11 @@ async fn run(app: AppHandle, disc: Disc, settings: Settings, force: bool, look: 
             return;
         }
     }
-    // The mods' code and texts, linked into the game's files.
+    // The mods' code and texts, linked into the game's files (on top of the core's, made from the
+    // disc the first time).
+    if mods::core_to_make(&app, &disc, &packages) {
+        set_state(&app, "preparing", None);
+    }
     if let Err(e) = mods::link_code(&app, &disc, &packages).await {
         set_state(&app, "error", Some(e));
         return;

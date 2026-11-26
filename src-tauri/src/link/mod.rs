@@ -1,5 +1,8 @@
-//! PartyLauncher's linker: it puts the mods' code into the game (wp-core docs/modding.md).
+//! PartyLauncher's linker: it puts the mods' code into the game (wp-core docs/modding.md), on top of the
+//! mods' core: the game rebuilt from its decompilation (wp-srccore docs/core.md), whose files are made
+//! from the player's disc (corepkg.rs) and go in place of the disc's.
 
+pub mod corepkg;
 pub mod dol;
 pub mod elf;
 pub mod minigames;
@@ -127,16 +130,21 @@ pub fn messages_file(language: &str) -> String {
     format!("/locale/{language}/mess.bin")
 }
 
-/// What the core says about one of its modules (wp-core tools/wpcore_pack.py, <module>.json).
+/// What the core says about one of its modules (wp-srccore tools/core/export.py, <module>.json).
 #[derive(Deserialize)]
 struct ModuleInfo {
     #[serde(flatten)]
     params: rel::RelParams,
     #[serde(default)]
     hooks: Vec<module::HookDef>,
-    /// Bytes of the board's save the mods share (0: none).
+    /// Bytes of the board's save the mods share; left out: the size of the module's gWpSave (none: 0).
     #[serde(default)]
-    save_bytes: u32,
+    save_bytes: Option<u32>,
+}
+
+/// The bytes of the board's save the mods share in `plf`.
+fn save_bytes(info: &ModuleInfo, plf: &elf::Object) -> u32 {
+    info.save_bytes.unwrap_or_else(|| plf.global("gWpSave").map_or(0, |s| plf.symbols[s].size))
 }
 
 /// The files and memory patches that put the mods' code into the game, as a Riivolution XML.
@@ -149,17 +157,9 @@ pub struct Linked {
     pub warnings: Vec<String>,
 }
 
-/// The core's modules (.plf) the launcher can link into: those with a <module>.json.
-pub fn core_modules(core: &Path) -> Vec<String> {
-    let mut found: Vec<String> = std::fs::read_dir(core)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".plf").map(String::from))
-        .filter(|m| core.join(format!("{m}.json")).is_file())
-        .collect();
-    found.sort();
-    found
+/// Whether link_game has something to do: a mod has code, minigames, texts or sounds.
+pub fn links(mods: &[CodeMod]) -> bool {
+    mods.iter().any(|m| m.has_code() || !m.messages.is_empty() || !m.sounds.is_empty())
 }
 
 fn read_object(dir: &Path, path: &str, id: &str) -> Result<elf::Object, LinkError> {
@@ -171,18 +171,30 @@ fn hexs(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02X}")).collect()
 }
 
-/// Links the mods' code (in load order) with the core into `out`: the core's modules they change (REL,
-/// LZ-compressed as on the disc), main.dol's memory patches and the message files with the mods' texts
-/// (from the disc's: `disc` reads one) and the sound archives with the mods' sound patches (from the
-/// disc's too), all in `out/linked.xml` (section "PartyLauncher", option "Code", choice 1). None if no
-/// mod has code, texts or sounds.
-pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mods: &[CodeMod], out: &Path) -> Result<Option<Linked>, LinkError> {
-    if mods.iter().all(|m| !m.has_code() && m.messages.is_empty() && m.sounds.is_empty()) {
+/// Links the mods' code (in load order) with the core into `out`: the core's files made from the disc
+/// (`base`: disc path, file; corepkg.rs), the core's modules with the mods' code (REL, LZ-compressed as on
+/// the disc), main.dol's memory patches, the mods' minigames (/wp/minigames.bin), the message files with
+/// the mods' texts (from the disc's: `disc` reads one) and the sound archives with the mods' sound patches
+/// (from the disc's too), all in `out/linked.xml` (section "PartyLauncher", option "Code", choice 1). A
+/// file of the core that a mod replaces whole (`replaced`: lowercase disc paths) is left to the mod, as
+/// the disc's would be, unless the mods' code changes it (mods.rs check tells that clash). None if no mod
+/// has code, minigames, texts or sounds.
+pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, base: &[(String, PathBuf)], replaced: &[String], mods: &[CodeMod], out: &Path) -> Result<Option<Linked>, LinkError> {
+    if !links(mods) {
         return Ok(None);
     }
-    let (lines, made, warnings) = build(core, Some(disc), mods)?;
+    let kept = |disc: &str| replaced.iter().any(|r| r.eq_ignore_ascii_case(disc) || r.eq_ignore_ascii_case(&format!("/{disc}")));
+    let (built, made, warnings) = build(core, Some(disc), &kept, mods)?;
     let io = |e: std::io::Error| LinkError::new(format!("{} : {e}", out.display()), &[]);
     let _ = std::fs::remove_dir_all(out);
+    // the core's files first: the linked modules and the mods' new ones, after them, win
+    let mut lines = Vec::new();
+    for (name, file) in base.iter().filter(|(name, _)| !kept(name)) {
+        let inside = corepkg::inside(name);
+        corepkg::put(file, &out.join(inside)).map_err(io)?;
+        lines.push(format!(r#"<file disc="{name}" external="{inside}"/>"#));
+    }
+    lines.extend(built);
     let mut files = Vec::new();
     for (name, bytes) in made {
         let inside = name.trim_start_matches('/');
@@ -201,42 +213,33 @@ pub fn link_game(core: &Path, disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mo
 }
 
 /// Whether the mods' code links (the texts aside): what link_game would say, without writing anything.
+#[allow(dead_code)] // (examples/wplink.rs)
 pub fn check_code(core: &Path, mods: &[CodeMod]) -> Result<(), LinkError> {
     if mods.iter().all(|m| !m.has_code()) {
         return Ok(());
     }
-    build(core, None, mods).map(|_| ())
+    build(core, None, &|_| false, mods).map(|_| ())
 }
 
 /// The XML's patch lines, the files they name (disc path, contents) and the warnings. Without `disc`, no
-/// texts and no sounds.
+/// files: only the modules the mods' code goes into are linked, and no texts and no sounds. `kept`: a disc
+/// file a mod replaces whole.
 type Built = (Vec<String>, Vec<(String, Vec<u8>)>, Vec<String>);
 
-fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mods: &[CodeMod]) -> Result<Built, LinkError> {
+fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, kept: &dyn Fn(&str) -> bool, mods: &[CodeMod]) -> Result<Built, LinkError> {
     let all: Vec<&str> = mods.iter().map(|m| m.id).collect();
     let io = |e: std::io::Error| LinkError::new(format!("cœur des mods : {e}"), &[]);
     let mut main = rel::MainSymbols::parse(&std::fs::read_to_string(core.join("main.sym")).map_err(io)?).map_err(|e| LinkError::new(e, &[]))?;
     let mut lines = Vec::new();
     let mut made = Vec::new();
 
-    // the mods' minigames: main.dol's longer table, at the start of the mods' memory
+    // the mods' minigames: the core reads them from /wp/minigames.bin
     let added: minigames::Added = mods.iter().filter(|m| !m.minigames.is_empty()).map(|m| (m.id, &m.minigames[..])).collect();
-    let mut table = minigames::Table { data: vec![], count: 0, patches: vec![] };
-    let mut registry = None;
-    if !added.is_empty() {
-        let ids: Vec<&str> = added.iter().map(|a| a.0).collect();
-        let text = std::fs::read_to_string(core.join("main.json")).map_err(|_| LinkError::new("ce launcher ne sait pas encore ajouter de mini-jeux (cœur sans main.json)".into(), &ids))?;
-        #[derive(Deserialize)]
-        struct MainInfo {
-            minigames: minigames::Registry,
-        }
-        let info: MainInfo = serde_json::from_str(&text).map_err(|e| LinkError::new(format!("main.json : {e}"), &[]))?;
-        table = minigames::table(&info.minigames, &added, dol::BASE)?;
-        if dol::BASE + table.data.len() as u32 > dol::END {
-            let over = dol::BASE + table.data.len() as u32 - dol::END;
-            return Err(LinkError::new(format!("trop de mini-jeux ajoutés : leur table dépasse la place libre ({over} octets de trop)"), &ids));
-        }
-        registry = Some(info.minigames);
+    minigames::check(&added)?;
+    if !added.is_empty() && disc.is_some() {
+        let inside = minigames::FILE.trim_start_matches('/');
+        lines.push(format!(r#"<file disc="{}" external="{inside}" create="true"/>"#, minigames::FILE));
+        made.push((minigames::FILE.to_string(), minigames::file(&added)));
     }
 
     // main.dol
@@ -254,26 +257,7 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         let writes = m.writes.iter().filter(|w| w.0 == "main").map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
         parts.push(dol::DolPart { id: m.id.to_string(), objects, injects, writes, ..Default::default() });
     }
-    // more minigames than the save's arrays hold: the core's code keeps the others (minigames.rs)
-    if let Some(extra) = registry.as_ref().filter(|r| table.count > r.max).and_then(|r| r.extra.as_ref()) {
-        let fail = |msg: String| LinkError::new(format!("cœur des mods : {msg}"), &[]);
-        let object = elf::Object::parse(&std::fs::read(core.join(&extra.object)).map_err(io)?).map_err(|e| fail(format!("{} : {e}", extra.object)))?;
-        let mut replaces = Vec::new();
-        for r in &extra.replace {
-            let expect = hex(&r.expect).ok_or_else(|| fail(format!("instruction « {} » invalide", r.expect)))?;
-            let at = main.get(&r.at).ok_or_else(|| fail(format!("« {} » n'est pas dans main.dol", r.at)))?.0;
-            // a function that starts with the table's address: the original runs the patched instruction
-            let run = match table.patches.iter().position(|p| p.0 == at) {
-                Some(i) => table.patches.remove(i).1,
-                None => expect,
-            };
-            replaces.push(dol::Replace { symbol: r.at.clone(), expect, run, handler: r.call.clone(), original: r.original.clone() });
-        }
-        let writes = vec![(extra.table.clone(), 0, dol::BASE.to_be_bytes().to_vec()), (extra.count.clone(), 0, table.count.to_be_bytes().to_vec())];
-        parts.push(dol::DolPart { id: "cœur".into(), objects: vec![object], replaces, writes, ..Default::default() });
-    }
-    let spare = registry.as_ref().and_then(minigames::reuse).map(|(address, original)| dol::Spare { address, original });
-    let (patches, symbols) = dol::link(&parts, &main, &table.data, spare.as_ref())?;
+    let (patches, symbols) = dol::link(&parts, &main)?;
     for p in patches {
         match &p.original {
             Some(o) => lines.push(format!(r#"<memory offset="0x{:08X}" value="{}" original="{}"/>"#, p.address, hexs(&p.value), hexs(o))),
@@ -285,30 +269,22 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         main.add(name, *address);
     }
 
-    for (address, value, original) in &table.patches {
-        lines.push(format!(r#"<memory offset="0x{address:08X}" value="{value:08X}" original="{original:08X}"/>"#));
-    }
-
-    // the core's modules
-    let cores = core_modules(core);
-    for module in &cores {
+    // the core's modules: always shipped (the disc's would not fit the core's main.dol), but those a mod
+    // replaces whole while no mod's code goes into them
+    let package = corepkg::read(core).map_err(|e| LinkError::new(e, &[]))?;
+    let cores = &package.modules;
+    for module in cores {
         let module = module.clone();
         let users: Vec<&CodeMod> = mods.iter().filter(|m| m.modules.contains_key(&module)).collect();
-        if users.is_empty() && added.is_empty() {
+        let name = format!("rel/{module}.rel.lz");
+        if users.is_empty() && (disc.is_none() || kept(&name)) {
             continue;
         }
         let plf = elf::Object::parse(&std::fs::read(core.join(format!("{module}.plf"))).map_err(io)?).map_err(|e| LinkError::new(format!("{module}.plf : {e}"), &[]))?;
-        // a module that lists the minigames itself (wp/mod/minigames.h) gets the mods' ones
-        let lists_minigames = plf.symbols.iter().any(|s| !s.is_defined() && s.name == "wpMinigames");
-        if users.is_empty() && !lists_minigames {
-            continue;
-        }
         let info: ModuleInfo = serde_json::from_str(&std::fs::read_to_string(core.join(format!("{module}.json"))).map_err(io)?)
             .map_err(|e| LinkError::new(format!("{module}.json : {e}"), &[]))?;
+        let room = save_bytes(&info, &plf);
         let mut parts = Vec::new();
-        if lists_minigames {
-            parts.push(module::ModPart { id: "cœur".into(), objects: vec![module::data_object("wpMinigames", minigames::module_list(&added))], ..Default::default() });
-        }
         let mut save_at = 0u32;
         let mut layout = 0x811C_9DC5u32; // FNV-1a of the mods' save layout: a save of another layout is ignored
         for m in &users {
@@ -316,9 +292,9 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
             let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
             let mut writes: Vec<(String, u32, Vec<u8>)> = m.writes.iter().filter(|w| w.0 == module).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
             if let Some(save) = &part.save {
-                if save_at + save.size > info.save_bytes {
+                if save_at + save.size > room {
                     let ids: Vec<&str> = users.iter().filter(|u| u.modules[&module].save.is_some()).map(|u| u.id).collect();
-                    return Err(LinkError::new(format!("plus assez de place dans la sauvegarde du plateau ({} octets en tout)", info.save_bytes), &ids));
+                    return Err(LinkError::new(format!("plus assez de place dans la sauvegarde du plateau ({room} octets en tout)"), &ids));
                 }
                 writes.push((save.symbol.clone(), 0, save_at.to_be_bytes().to_vec()));
                 for b in m.id.bytes().chain(save_at.to_be_bytes()).chain(save.size.to_be_bytes()) {
@@ -334,15 +310,19 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
                 writes,
             });
         }
-        if info.save_bytes > 0 && plf.global("gWpSaveLayout").is_some() {
+        if room > 0 && plf.global("gWpSaveLayout").is_some() {
             parts.push(module::ModPart { id: "cœur".into(), writes: vec![("gWpSaveLayout".into(), 0, layout.to_be_bytes().to_vec())], ..Default::default() });
         }
-        let linked = module::link(&plf, &info.hooks, &parts)?;
+        let linked = module::link(&plf, &info.hooks, &parts, &main)?;
         let bytes = rel::write(&linked, &info.params, &main).map_err(|e| LinkError::new(format!("{module} : {e}"), &all))?;
         if disc.is_some() {
-            let name = format!("rel/{module}.rel.lz");
-            lines.push(format!(r#"<file disc="/{name}" external="{name}"/>"#));
-            made.push((format!("/{name}"), crate::lz::compress(&bytes)));
+            let packed = crate::lz::compress(&bytes);
+            // (a twin of the disc plays the same module: mg418 = mg103)
+            let twins = package.twins.iter().filter(|(_, of)| **of == module).map(|(twin, _)| format!("rel/{twin}.rel.lz"));
+            for name in std::iter::once(name.clone()).chain(twins) {
+                lines.push(format!(r#"<file disc="/{name}" external="{name}"/>"#));
+                made.push((format!("/{name}"), packed.clone()));
+            }
         }
     }
 
@@ -368,7 +348,7 @@ fn build(core: &Path, disc: Option<&dyn Fn(&str) -> Result<Vec<u8>, String>>, mo
         }
         let objects = part.objects.iter().map(|o| read_object(m.dir, o, m.id)).collect::<Result<_, _>>()?;
         let writes = m.writes.iter().filter(|w| &w.0 == *name).map(|w| (w.1.clone(), w.2, w.3.clone())).collect();
-        let linked = module::link(&module::empty_module(), &[], &[module::ModPart { id: m.id.to_string(), objects, writes, ..Default::default() }])?;
+        let linked = module::link(&module::empty_module(), &[], &[module::ModPart { id: m.id.to_string(), objects, writes, ..Default::default() }], &main)?;
         let params = rel::RelParams {
             module_id: NEW_MODULE_ID + index as u32,
             num_sections: linked.sections.len() as u32,
@@ -468,9 +448,57 @@ fn sounds(disc: &dyn Fn(&str) -> Result<Vec<u8>, String>, mods: &[CodeMod], line
 mod tests {
     use super::*;
 
-    /// wp-core's export (tools/wpcore_pack.py): WP_CORE=<…/build/SUPP01/wpcore>.
+    /// The core's export (wp-srccore tools/core/export.py): WP_CORE=<…/build/SUPP01/corepkg>.
     fn core_dir() -> Option<std::path::PathBuf> {
         std::env::var("WP_CORE").ok().map(Into::into)
+    }
+
+    /// The launcher's core (src-tauri/core), its files made from the disc faked (the files are only put in place).
+    #[test]
+    fn puts_the_core_in_place_of_the_disc() {
+        let core = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("core");
+        let dir = std::env::temp_dir().join("wp-link-core-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("made/rel")).unwrap();
+        let base: Vec<(String, PathBuf)> = ["main.dol", "/rel/mg100.rel.lz", "/rel/mg101.rel.lz"].iter().map(|d| (d.to_string(), dir.join("made").join(d.trim_start_matches('/')))).collect();
+        for (d, f) in &base {
+            std::fs::write(f, d).unwrap();
+        }
+        let spec = minigames::Spec { id: 305, category: "1v3".into(), kind: None, pool: true, sounds_of: 406, rules: None, controls: Some(110), controls_team: Some(2), free_play: true };
+        let winter = CodeMod {
+            id: "winter",
+            dir: &dir,
+            modules: BTreeMap::new(),
+            writes: Vec::new(),
+            messages: BTreeMap::new(),
+            messages_with: BTreeMap::new(),
+            minigames: vec![spec],
+            sounds: Vec::new(),
+        };
+        let disc = |path: &str| Err(format!("{path} : pas de disque"));
+        let out = dir.join("linked");
+        // a mod replaces mg101 and inst whole: theirs are kept
+        let replaced = ["/rel/mg101.rel.lz".to_string(), "/rel/inst.rel.lz".to_string()];
+        let linked = link_game(&core, &disc, &base, &replaced, &[winter], &out).unwrap().unwrap();
+        let xml = std::fs::read_to_string(&linked.xml).unwrap();
+        let lines: Vec<&str> = xml.lines().filter(|l| l.starts_with("<file") || l.starts_with("<memory")).collect();
+        assert_eq!(
+            lines,
+            [
+                r#"<file disc="main.dol" external="main.dol"/>"#,
+                r#"<file disc="/rel/mg100.rel.lz" external="rel/mg100.rel.lz"/>"#,
+                r#"<file disc="/wp/minigames.bin" external="wp/minigames.bin" create="true"/>"#,
+                r#"<file disc="/rel/mr001.rel.lz" external="rel/mr001.rel.lz"/>"#,
+                r#"<file disc="/rel/menu.rel.lz" external="rel/menu.rel.lz"/>"#,
+            ]
+        );
+        assert_eq!(std::fs::read_to_string(out.join("main.dol")).unwrap(), "main.dol");
+        assert_eq!(std::fs::read(out.join("wp/minigames.bin")).unwrap().len(), 16 + 0x28);
+        assert!(crate::lz::decompress(&std::fs::read(out.join("rel/mr001.rel.lz")).unwrap()).is_ok());
+        assert!(!out.join("rel/mg101.rel.lz").exists() && !out.join("rel/inst.rel.lz").exists());
+        // no code, no texts, no sounds: nothing
+        assert!(link_game(&core, &disc, &base, &[], &[], &out).unwrap().is_none());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -499,29 +527,25 @@ mod tests {
         assert_eq!(p::all(), [0x9421FE50, 0x90010008, 0xBC410010, 0x7C0802A6, 0x7C0803A6, 0x7C000026, 0x7C0FF120, 0x7C0902A6, 0x7C0903A6, 0x7C0102A6, 0x7C0103A6, 0xD8010098, 0xC8010098, 0x38000000, 0x2C000000, 0x41820010, 0xB8410010, 0x80010008]);
     }
 
-    /// WP_CORE (the core's export, for the REL header values), WP_PLAIN (the .plf of the matching build,
-    /// without the hooks) and WP_DISC_RELS (the disc's RELs, decompressed): each <module>.plf of WP_PLAIN
-    /// makes its disc REL again, byte for byte.
+    /// WP_CORE (the core's export) and WP_CORE_BUILD (the build it was made from, wp-srccore
+    /// build/SUPP01): each module of the core, linked with no mod, is the build's REL, byte for byte.
     #[test]
     #[ignore]
-    fn makes_the_disc_rels_again() {
+    fn makes_the_core_rels_again() {
         let dir = core_dir().expect("WP_CORE");
-        let plain = std::path::PathBuf::from(std::env::var("WP_PLAIN").expect("WP_PLAIN"));
-        let discs = std::path::PathBuf::from(std::env::var("WP_DISC_RELS").expect("WP_DISC_RELS"));
+        let build = std::path::PathBuf::from(std::env::var("WP_CORE_BUILD").expect("WP_CORE_BUILD"));
         let main = rel::MainSymbols::parse(&std::fs::read_to_string(dir.join("main.sym")).unwrap()).unwrap();
-        let mut done = 0;
-        for module in core_modules(&dir) {
-            let Ok(bytes) = std::fs::read(plain.join(format!("{module}.plf"))) else { continue };
-            let plf = elf::Object::parse(&bytes).unwrap();
-            let params: rel::RelParams = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{module}.json"))).unwrap()).unwrap();
-            let made = rel::write(&plf, &params, &main).unwrap();
-            let want = std::fs::read(discs.join(format!("{module}.rel"))).unwrap();
+        let modules = corepkg::read(&dir).unwrap().modules;
+        for module in &modules {
+            let plf = elf::Object::parse(&std::fs::read(dir.join(format!("{module}.plf"))).unwrap()).unwrap();
+            let info: ModuleInfo = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{module}.json"))).unwrap()).unwrap();
+            let made = rel::write(&module::link(&plf, &info.hooks, &[], &main).unwrap(), &info.params, &main).unwrap();
+            let want = std::fs::read(build.join(module).join(format!("{module}.rel"))).unwrap();
             assert_eq!(made.len(), want.len(), "{module}");
             if let Some(at) = made.iter().zip(&want).position(|(a, b)| a != b) {
                 panic!("{module}: first difference at {at:#X}");
             }
-            done += 1;
         }
-        assert!(done > 0);
+        assert!(!modules.is_empty());
     }
 }

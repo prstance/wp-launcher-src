@@ -1,11 +1,13 @@
 //! Before a launch: the packages' files that are deltas against the player's own
 //! disc (delta.rs, the "delta" patches), made once into the package's folder,
 //! where its Riivolution XML expects them. A package update replaces the folder,
-//! and so makes them again.
+//! and so makes them again. The mods' core's files too (link/corepkg.rs), once
+//! for a core and a disc, into the mods' folder.
 
 use crate::delta::{self, Error};
 use crate::game;
 use crate::i18n::tr;
+use crate::link::corepkg::{self, MakeError};
 use crate::mods::{DeltaFile, Installed};
 use crate::settings::Disc;
 use crate::tools;
@@ -49,20 +51,20 @@ fn missing(packages: &[&Installed]) -> Vec<Job> {
         .collect()
 }
 
-/// Takes the disc files `jobs` need into `out`: a folder in one go when many come from it.
-async fn extract(app: &AppHandle, disc: &Disc, jobs: &[Job], out: &Path) -> Result<(), String> {
+/// Takes the disc files `files` (disc paths) into `out`: a folder in one go when many come from it.
+async fn extract(app: &AppHandle, disc: &Disc, files: &[&str], out: &Path) -> Result<(), String> {
     let tool = tools::dolphin_tool(app).ok_or_else(|| tr!("Dolphin est absent de ce build du launcher."))?;
     let mut folders: BTreeMap<String, usize> = BTreeMap::new();
-    for job in jobs {
-        let path = single(&job.file.disc);
+    for file in files {
+        let path = single(file);
         if let Some((folder, _)) = path.rsplit_once('/') {
             *folders.entry(folder.to_string()).or_default() += 1;
         }
     }
     let whole: Vec<&String> = folders.iter().filter(|(f, n)| **n >= WHOLE_FOLDER && f.as_str() != "sys").map(|(f, _)| f).collect();
     let mut wanted: Vec<String> = whole.iter().map(|f| f.to_string()).collect();
-    for job in jobs {
-        let path = single(&job.file.disc);
+    for file in files {
+        let path = single(file);
         if !whole.iter().any(|f| path.rsplit_once('/').is_some_and(|(parent, _)| parent == f.as_str())) && !wanted.contains(&path) {
             wanted.push(path);
         }
@@ -149,6 +151,55 @@ pub fn disc_file(dir: &Path, file: &str) -> PathBuf {
     extracted(dir, &single(file))
 }
 
+/// The core's files' folder, and the disc as it tells it (another disc, or the same one changed, makes
+/// them again).
+fn core_cache(app: &AppHandle, disc: &Disc) -> Result<(PathBuf, String), String> {
+    let size = std::fs::metadata(&disc.path).map(|m| m.len()).unwrap_or(0);
+    Ok((game::data_dir(app, "mods")?.join(".core"), format!("{}\n{size}", disc.path)))
+}
+
+/// Whether the core's files are still to make.
+pub fn core_needed(app: &AppHandle, disc: &Disc, core: &Path) -> bool {
+    let Ok(package) = corepkg::read(core) else { return false };
+    core_cache(app, disc).is_ok_and(|(cache, id)| !package.is_made(core, &cache, &id))
+}
+
+/// The core's files (disc path, file), made from the disc the first time.
+pub async fn core_files(app: &AppHandle, disc: &Disc, core: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    let package = corepkg::read(core)?;
+    let (cache, id) = core_cache(app, disc)?;
+    if !package.is_made(core, &cache, &id) {
+        let out = game::data_dir(app, "mods")?.join(".extract-core");
+        let _ = std::fs::remove_dir_all(&out);
+        let result = async {
+            let files: Vec<&str> = package.deltas.iter().map(|d| d.disc.as_str()).collect();
+            extract(app, disc, &files, &out).await?;
+            let (core, cache, at) = (core.to_path_buf(), cache.clone(), out.clone());
+            tokio::task::spawn_blocking(move || {
+                let package = corepkg::read(&core)?;
+                let read = |file: &str| {
+                    let path = single(file);
+                    std::fs::read(extracted(&at, &path)).map_err(|_| tr!("Impossible de lire {file} sur ton ISO.", file = path))
+                };
+                package.make(&core, &cache, &id, &read).map_err(|e| match e {
+                    MakeError::OtherSource(file) => tr!(
+                        "Le cœur des mods a besoin du fichier d’origine {file}, que ton ISO n’a pas : il lui faut le disque d’origine de Wii Party (SUPP01), sans mod.",
+                        file = single(&file)
+                    ),
+                    MakeError::Broken(file) => tr!("Le cœur des mods est abîmé ({file}) : réinstalle le launcher.", file = file),
+                    MakeError::Io(e) => e,
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
+        .await;
+        let _ = std::fs::remove_dir_all(&out);
+        result?;
+    }
+    Ok(package.files(&cache))
+}
+
 /// Whether some files are still to make.
 pub fn needed(packages: &[&Installed]) -> bool {
     !missing(packages).is_empty()
@@ -163,7 +214,8 @@ pub async fn prepare(app: &AppHandle, disc: &Disc, packages: &[&Installed]) -> R
     let out = game::data_dir(app, "mods")?.join(".extract");
     let _ = std::fs::remove_dir_all(&out);
     let result = async {
-        extract(app, disc, &jobs, &out).await?;
+        let files: Vec<&str> = jobs.iter().map(|j| j.file.disc.as_str()).collect();
+        extract(app, disc, &files, &out).await?;
         let at = out.clone();
         tokio::task::spawn_blocking(move || make(&jobs, &at)).await.map_err(|e| e.to_string())?
     }
